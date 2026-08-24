@@ -1,0 +1,6 @@
+{
+  "name": "3D Container Packing Optimizer",
+  "description": "High-performance 3D container load planning and bin packing optimization system with interactive 3D visualization, multi-heuristic algorithms, weight distribution analysis, and step-by-step loading guide.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
