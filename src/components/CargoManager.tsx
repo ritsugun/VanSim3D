@@ -138,9 +138,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     setShowPresetsModal(false);
   };
 
-  // Export CSV (Following the exact user schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),最小個数,最大個数,3D回転許可(1/0),カラー(16進数))
+  // Export CSV (Following the user schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),最小個数,最大個数,3D回転許可(1/0),カラー(16進数),割れ物(1/0))
   const handleExportCsv = () => {
-    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '最小個数', '最大個数', '3D回転許可(1/0)', 'カラー(16進数)'];
+    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '最小個数', '最大個数', '3D回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)'];
     const rows = cargoList.map(c => [
       `"${c.name}"`,
       c.width,
@@ -150,7 +150,8 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       c.minQuantity ?? c.quantity,
       c.maxQuantity ?? c.quantity,
       c.allowTilt && c.allowRoll ? 1 : 0,
-      c.color
+      c.color,
+      c.fragile ? 1 : 0
     ]);
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -177,7 +178,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Import CSV - Smart detection for both the exact user schema & multi-column CSVs
+  // Import CSV - Smart detection for both the 10-column (with 割れ物) & legacy 9-column format
   const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -207,8 +208,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       }
       let rotIdx = headerParts.findIndex(h => /3D回転|回転許可|回転|Rotate|Rotation/i.test(h));
       let colorIdx = headerParts.findIndex(h => /カラー|色|Color|Hex/i.test(h));
+      let fragileIdx = headerParts.findIndex(h => /割れ物|天地無用|壊れ物|壊れもの|Fragile/i.test(h));
 
-      // Positional fallbacks for exact 9-column format
+      // Positional fallbacks for exact format
       if (nameIdx === -1) nameIdx = 0;
       if (widthIdx === -1) widthIdx = 1;
       if (heightIdx === -1) heightIdx = 2;
@@ -222,6 +224,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       }
       if (rotIdx === -1) rotIdx = 7;
       if (colorIdx === -1) colorIdx = 8;
+      if (fragileIdx === -1 && headerParts.length >= 10) fragileIdx = 9;
 
       const newItems: CargoItem[] = [];
       for (let i = 1; i < lines.length; i++) {
@@ -239,6 +242,16 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         const rawColor = parts[colorIdx];
         const validHex = /^#[0-9A-Fa-f]{6}$/.test(rawColor) ? rawColor : COLOR_PALETTE[(i - 1) % COLOR_PALETTE.length];
 
+        // Explicit Fragile Flag Check (1/0 or true/false)
+        let isFragile = false;
+        if (fragileIdx !== -1 && parts[fragileIdx] !== undefined && parts[fragileIdx] !== '') {
+          const rawFrag = parts[fragileIdx].toLowerCase().trim();
+          isFragile = rawFrag === '1' || rawFrag === 'true' || rawFrag === 'yes' || rawFrag === '割れ物' || rawFrag === '天地無用';
+        } else {
+          // Fallback heuristic if column is omitted
+          isFragile = itemHeight > 1800;
+        }
+
         newItems.push({
           id: `csv_${Date.now()}_${i}`,
           sku: itemName,
@@ -254,15 +267,15 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           allowTilt: allow3DRot,
           allowRoll: allow3DRot,
           allowYaw: true,
-          maxStackWeight: itemHeight > 1800 ? 0 : 150,
-          fragile: itemHeight > 1800,
+          maxStackWeight: isFragile ? 0 : (itemHeight > 1800 ? 0 : 150),
+          fragile: isFragile,
           priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3)
         });
       }
 
       if (newItems.length > 0) {
         onChangeCargoList(newItems);
-        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！` : `Successfully imported ${newItems.length} cargo items from CSV!`);
+        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！（割れ物フラグ反映済）` : `Successfully imported ${newItems.length} cargo items from CSV with fragile flags!`);
         setTimeout(() => setImportNotification(null), 4000);
       }
     };
@@ -313,7 +326,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           <label 
             id="import-csv-label" 
             className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer font-medium flex items-center gap-1.5 transition-colors"
-            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,最小個数,最大個数,3D回転許可,カラー)' : 'Import from CSV'}
+            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,最小個数,最大個数,3D回転許可,カラー,割れ物)' : 'Import from CSV'}
           >
             <Upload className="w-3.5 h-3.5 text-emerald-600" />
             <span>{isJa ? 'CSV取込' : 'Import'}</span>
@@ -573,21 +586,38 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                     <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                       {cargo.color}
                     </span>
-                    {cargo.allowTilt && cargo.allowRoll ? (
-                      <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[9px] px-1 py-0.2 rounded font-semibold">
-                        3D回転:1
-                      </span>
-                    ) : (
-                      <span className="bg-slate-100 text-slate-600 border border-slate-200 text-[9px] px-1 py-0.2 rounded font-medium">
-                        3D回転:0
-                      </span>
-                    )}
-                    {cargo.fragile && (
-                      <span className="bg-red-50 text-red-700 border border-red-200 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
-                        <ShieldAlert className="w-3 h-3 text-red-600" />
-                        {isJa ? '割れ物' : 'Fragile'}
-                      </span>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateItem(cargo.id, { 
+                        allowTilt: !(cargo.allowTilt && cargo.allowRoll),
+                        allowRoll: !(cargo.allowTilt && cargo.allowRoll)
+                      })}
+                      title={isJa ? 'クリックで3D回転許可を切替' : 'Click to toggle 3D rotation'}
+                      className={`text-[9px] px-1.5 py-0.5 rounded font-semibold cursor-pointer transition-colors border ${
+                        cargo.allowTilt && cargo.allowRoll 
+                          ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
+                          : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                      }`}
+                    >
+                      3D回転:{cargo.allowTilt && cargo.allowRoll ? '1' : '0'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateItem(cargo.id, { 
+                        fragile: !cargo.fragile,
+                        maxStackWeight: !cargo.fragile ? 0 : 150
+                      })}
+                      title={isJa ? 'クリックで割れ物(上積み禁止)を切替' : 'Click to toggle fragile'}
+                      className={`text-[9px] px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors flex items-center gap-0.5 border ${
+                        cargo.fragile
+                          ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                          : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                      }`}
+                    >
+                      <ShieldAlert className="w-3 h-3" />
+                      {cargo.fragile ? (isJa ? '割れ物:1' : 'Fragile:1') : (isJa ? '割れ物:0' : 'Fragile:0')}
+                    </button>
                   </div>
                   <div className="text-[11px] text-slate-500 flex items-center gap-2.5 mt-1 flex-wrap">
                     <span className="font-mono text-slate-700 font-medium">

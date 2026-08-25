@@ -17,7 +17,7 @@ import {
 
 export default function App() {
   // Application State
-  const [language, setLanguage] = useState<Language>('ja');
+  const [language, setLanguage] = useState<Language>('en');
   const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
   const [algorithm, setAlgorithm] = useState<AlgorithmType>('extreme_points_bfd');
   const [selectedContainer, setSelectedContainer] = useState<Container>(STANDARD_CONTAINERS[1]); // 40GP default for full HVAC manifest
