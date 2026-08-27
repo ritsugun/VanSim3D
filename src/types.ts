@@ -29,13 +29,11 @@ export interface CargoItem {
   width: number;  // mm (幅 / Width)
   height: number; // mm (高さ / Height)
   weight: number; // kg
-  quantity: number;
-  minQuantity?: number; // 最小個数
-  maxQuantity?: number; // 最大個数
+  quantity: number; // 個数 (積載対象の個数)
   color: string;
-  allowTilt: boolean;  // Allow rotation along X
-  allowRoll: boolean;  // Allow rotation along Y
-  allowYaw: boolean;   // Allow rotation along Z (standard 90 deg yaw)
+  allowYaw: boolean;   // 横回転許可 (Allow 90-deg horizontal yaw rotation on floor plane, keeping height upright)
+  allowTilt?: boolean; // 縦回転(チルト) - 無効
+  allowRoll?: boolean; // 縦回転(ロール) - 無効
   maxStackWeight?: number; // kg that can be placed on top of this item
   fragile?: boolean;   // If fragile, nothing can be stacked on top (or max stack weight = 0)
   priority?: number;   // 1 = High / Load first (or unload last), 3 = Normal, 5 = Unload first (at door)

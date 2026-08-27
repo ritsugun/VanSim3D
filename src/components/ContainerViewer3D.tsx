@@ -143,7 +143,6 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
-      controls.maxPolarAngle = Math.PI / 2 + 0.05;
       controlsRef.current = controls;
 
       // Lighting setup
@@ -168,6 +167,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
       camera.position.set(contLengthM * 1.5, contHeightM * 1.8, contWidthM * 2.2);
       controls.target.set(contLengthM / 2, contHeightM / 2, contWidthM / 2);
+      controls.update();
+
+      // Lock vertical rotation (polar angle) so rotation is purely horizontal (yaw only)
+      const initialPolar = controls.getPolarAngle();
+      controls.minPolarAngle = initialPolar;
+      controls.maxPolarAngle = initialPolar;
       controls.update();
 
       // Signal scene is ready for mesh population
@@ -303,6 +308,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
     // Re-center camera controls target
     if (controlsRef.current && cameraRef.current) {
+      controlsRef.current.minPolarAngle = 0;
+      controlsRef.current.maxPolarAngle = Math.PI;
       if (isSideBySide) {
         const totalZ = (countToRender - 1) * spacingM + widM;
         controlsRef.current.target.set(lenM / 2, heiM / 2, totalZ / 2);
@@ -310,6 +317,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       } else {
         controlsRef.current.target.set(lenM / 2, heiM / 2, widM / 2);
       }
+      controlsRef.current.update();
+      const currentPolar = controlsRef.current.getPolarAngle();
+      controlsRef.current.minPolarAngle = currentPolar;
+      controlsRef.current.maxPolarAngle = currentPolar;
       controlsRef.current.update();
     }
   }, [container, currentTab, containers, sceneReady]);
@@ -604,6 +615,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const target = new THREE.Vector3(lenM / 2, heiM / 2, totalZ / 2);
     controlsRef.current.target.copy(target);
 
+    // Temporarily allow polar repositioning
+    controlsRef.current.minPolarAngle = 0;
+    controlsRef.current.maxPolarAngle = Math.PI;
+
     if (type === 'iso') {
       cameraRef.current.position.set(lenM * 1.5, heiM * 1.8, totalZ * 1.4);
     } else if (type === 'top') {
@@ -613,6 +628,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     } else if (type === 'door') {
       cameraRef.current.position.set(lenM * 2.4, heiM * 0.8, totalZ / 2);
     }
+    controlsRef.current.update();
+
+    // Lock vertical rotation (polar angle) to new view's elevation for horizontal-only rotation
+    const newPolar = controlsRef.current.getPolarAngle();
+    controlsRef.current.minPolarAngle = newPolar;
+    controlsRef.current.maxPolarAngle = newPolar;
     controlsRef.current.update();
   };
 

@@ -148,8 +148,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 125,
         quantity: 1,
-        minQuantity: 1,
-        maxQuantity: 1,
         color: '#ef4444',
         allowTilt: false,
         allowRoll: false,
@@ -167,8 +165,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 840,
         weight: 70,
         quantity: 5,
-        minQuantity: 5,
-        maxQuantity: 5,
         color: '#06b6d4',
         allowTilt: false,
         allowRoll: false,
@@ -186,8 +182,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 840,
         weight: 57,
         quantity: 10,
-        minQuantity: 10,
-        maxQuantity: 10,
         color: '#eab308',
         allowTilt: false,
         allowRoll: false,
@@ -205,8 +199,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 840,
         weight: 77,
         quantity: 15,
-        minQuantity: 15,
-        maxQuantity: 15,
         color: '#10b981',
         allowTilt: false,
         allowRoll: false,
@@ -224,8 +216,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 1150,
         weight: 94,
         quantity: 3,
-        minQuantity: 3,
-        maxQuantity: 3,
         color: '#8b5cf6',
         allowTilt: false,
         allowRoll: false,
@@ -243,8 +233,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 760,
         weight: 292,
         quantity: 5,
-        minQuantity: 5,
-        maxQuantity: 5,
         color: '#f97316',
         allowTilt: false,
         allowRoll: false,
@@ -262,8 +250,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 760,
         weight: 244,
         quantity: 2,
-        minQuantity: 2,
-        maxQuantity: 2,
         color: '#ec4899',
         allowTilt: false,
         allowRoll: false,
@@ -281,8 +267,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 32,
         quantity: 2,
-        minQuantity: 2,
-        maxQuantity: 2,
         color: '#3b82f6',
         allowTilt: false,
         allowRoll: false,
@@ -300,8 +284,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 101,
         quantity: 1,
-        minQuantity: 1,
-        maxQuantity: 1,
         color: '#14b8a6',
         allowTilt: false,
         allowRoll: false,
@@ -319,8 +301,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 29,
         quantity: 2,
-        minQuantity: 2,
-        maxQuantity: 2,
         color: '#6366f1',
         allowTilt: false,
         allowRoll: false,
@@ -338,8 +318,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 35,
         quantity: 5,
-        minQuantity: 5,
-        maxQuantity: 5,
         color: '#d97706',
         allowTilt: false,
         allowRoll: false,
@@ -357,8 +335,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 39,
         quantity: 5,
-        minQuantity: 5,
-        maxQuantity: 5,
         color: '#059669',
         allowTilt: false,
         allowRoll: false,
@@ -376,8 +352,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 125,
         quantity: 3,
-        minQuantity: 3,
-        maxQuantity: 3,
         color: '#4f46e5',
         allowTilt: false,
         allowRoll: false,
@@ -395,8 +369,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 700,
         weight: 37,
         quantity: 1,
-        minQuantity: 1,
-        maxQuantity: 1,
         color: '#e11d48',
         allowTilt: false,
         allowRoll: false,
@@ -414,8 +386,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 840,
         weight: 58,
         quantity: 10,
-        minQuantity: 10,
-        maxQuantity: 10,
         color: '#0284c7',
         allowTilt: false,
         allowRoll: false,
@@ -433,8 +403,6 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         length: 1150,
         weight: 94,
         quantity: 5,
-        minQuantity: 5,
-        maxQuantity: 5,
         color: '#7c3aed',
         allowTilt: false,
         allowRoll: false,
@@ -480,8 +448,8 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         weight: 10,
         quantity: 120,
         color: '#10b981', // Green
-        allowTilt: true,
-        allowRoll: true,
+        allowTilt: false,
+        allowRoll: false,
         allowYaw: true,
         maxStackWeight: 80,
         fragile: false,
@@ -497,8 +465,8 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         weight: 4,
         quantity: 150,
         color: '#f59e0b', // Amber
-        allowTilt: true,
-        allowRoll: true,
+        allowTilt: false,
+        allowRoll: false,
         allowYaw: true,
         maxStackWeight: 40,
         fragile: false,
@@ -575,8 +543,8 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         weight: 12,
         quantity: 80,
         color: '#14b8a6', // Teal
-        allowTilt: true,
-        allowRoll: true,
+        allowTilt: false,
+        allowRoll: false,
         allowYaw: true,
         maxStackWeight: 60,
         fragile: false,
@@ -636,7 +604,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         weight: 8,
         quantity: 140,
         color: '#06b6d4', // Cyan
-        allowTilt: true,
+        allowTilt: false,
         allowRoll: false,
         allowYaw: true,
         maxStackWeight: 60,
@@ -653,8 +621,8 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         weight: 12,
         quantity: 120,
         color: '#eab308', // Yellow
-        allowTilt: true,
-        allowRoll: true,
+        allowTilt: false,
+        allowRoll: false,
         allowYaw: true,
         maxStackWeight: 90,
         fragile: false,
@@ -725,16 +693,16 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
   }
 ];
 
-export const SAMPLE_CSV_TEMPLATE = `貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),最小個数,最大個数,3D回転許可(1/0),カラー(16進数),割れ物(1/0)
-CMB-M108V-KB1,1100,1230,700,125,1,1,0,#ef4444,0
-PURY-P350YNW-A2,1270,1920,760,292,5,5,0,#f97316,1
-PURY-M200YNW-A1,950,1920,760,244,2,2,0,#ec4899,1
-CMB-M104V-J1,1070,380,700,32,2,2,0,#3b82f6,0
-CMB-M104V-KB1,1100,1230,700,101,1,1,0,#14b8a6,0
-CMB-M104V-KB1,1070,380,700,29,2,2,0,#6366f1,0
-CMB-M106V-J1,1070,380,700,35,5,5,0,#d97706,0
-CMB-M108V-J1,1070,380,700,39,5,5,0,#059669,0
-CMB-M108V-KB1,1100,1230,700,125,3,3,0,#4f46e5,0
-CMB-M108V-KB1,1070,380,700,37,1,1,0,#e11d48,0
-CMB-M1012V-J1,1380,380,840,58,10,10,0,#0284c7,0
-CMB-M1012V-MA-SV,1750,390,1150,94,5,5,0,#7c3aed,0`;
+export const SAMPLE_CSV_TEMPLATE = `貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0)
+CMB-M108V-KB1,1100,1230,700,125,1,1,#ef4444,0
+PURY-P350YNW-A2,1270,1920,760,292,5,1,#f97316,1
+PURY-M200YNW-A1,950,1920,760,244,2,1,#ec4899,1
+CMB-M104V-J1,1070,380,700,32,2,1,#3b82f6,0
+CMB-M104V-KB1,1100,1230,700,101,1,1,#14b8a6,0
+CMB-M104V-KB1,1070,380,700,29,2,1,#6366f1,0
+CMB-M106V-J1,1070,380,700,35,5,1,#d97706,0
+CMB-M108V-J1,1070,380,700,39,5,1,#059669,0
+CMB-M108V-KB1,1100,1230,700,125,3,1,#4f46e5,0
+CMB-M108V-KB1,1070,380,700,37,1,1,#e11d48,0
+CMB-M1012V-J1,1380,380,840,58,10,1,#0284c7,0
+CMB-M1012V-MA-SV,1750,390,1150,94,5,1,#7c3aed,0`;

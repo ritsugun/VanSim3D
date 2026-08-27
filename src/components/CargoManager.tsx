@@ -58,8 +58,6 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     length: 700,
     weight: 125,
     quantity: 1,
-    minQuantity: 1,
-    maxQuantity: 1,
     color: '#ef4444',
     allowTilt: false,
     allowRoll: false,
@@ -81,9 +79,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       width: Math.max(10, Number(newItem.width)),
       height: Math.max(10, Number(newItem.height)),
       weight: Math.max(0.1, Number(newItem.weight)),
-      quantity: Math.max(1, Number(newItem.quantity || newItem.maxQuantity || 1)),
-      minQuantity: Math.max(1, Number(newItem.minQuantity || 1)),
-      maxQuantity: Math.max(1, Number(newItem.maxQuantity || newItem.quantity || 1))
+      quantity: Math.max(1, Number(newItem.quantity || 1))
     };
     onChangeCargoList([...cargoList, created]);
     setIsAddingNew(false);
@@ -96,8 +92,6 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       length: 800,
       weight: 45,
       quantity: 5,
-      minQuantity: 1,
-      maxQuantity: 5,
       color: COLOR_PALETTE[(cargoList.length + 1) % COLOR_PALETTE.length],
       allowTilt: false,
       allowRoll: false,
@@ -140,18 +134,17 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     setShowPresetsModal(false);
   };
 
-  // Export CSV (Following the user schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),最小個数,最大個数,3D回転許可(1/0),カラー(16進数),割れ物(1/0))
+  // Export CSV (Following schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0))
   const handleExportCsv = () => {
-    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '最小個数', '最大個数', '3D回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)'];
+    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)'];
     const rows = cargoList.map(c => [
       `"${c.name}"`,
       c.width,
       c.height,
       c.length,
       c.weight,
-      c.minQuantity ?? c.quantity,
-      c.maxQuantity ?? c.quantity,
-      c.allowTilt && c.allowRoll ? 1 : 0,
+      c.quantity,
+      c.allowYaw !== false ? 1 : 0,
       c.color,
       c.fragile ? 1 : 0
     ]);
@@ -203,30 +196,26 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       let heightIdx = headerParts.findIndex(h => /高さ|Height|H/i.test(h));
       let depthIdx = headerParts.findIndex(h => /奥行|奥行き|長さ|Depth|Length|L|D/i.test(h));
       let weightIdx = headerParts.findIndex(h => /重量|Weight|Kg|Wt/i.test(h));
-      let minQtyIdx = headerParts.findIndex(h => /最小個数|最小数量|最小|Min/i.test(h));
-      let maxQtyIdx = headerParts.findIndex(h => /最大個数|最大数量|最大|Max/i.test(h));
-      if (maxQtyIdx === -1) {
-        maxQtyIdx = headerParts.findIndex(h => /個数|数量|Quantity|Qty/i.test(h));
-      }
-      let rotIdx = headerParts.findIndex(h => /3D回転|回転許可|回転|Rotate|Rotation/i.test(h));
+      let qtyIdx = headerParts.findIndex(h => /個数|数量|最大個数|最大数量|Quantity|Qty|MaxQty|Max/i.test(h));
+      let minQtyIdx = headerParts.findIndex(h => /最小個数|最小数量|MinQty|Min/i.test(h));
+      let rotIdx = headerParts.findIndex(h => /横回転|3D回転|回転許可|回転|Rotate|Rotation|Yaw/i.test(h));
       let colorIdx = headerParts.findIndex(h => /カラー|色|Color|Hex/i.test(h));
       let fragileIdx = headerParts.findIndex(h => /割れ物|天地無用|壊れ物|壊れもの|Fragile/i.test(h));
 
-      // Positional fallbacks for exact format
+      // Positional fallbacks
       if (nameIdx === -1) nameIdx = 0;
       if (widthIdx === -1) widthIdx = 1;
       if (heightIdx === -1) heightIdx = 2;
       if (depthIdx === -1) depthIdx = 3;
       if (weightIdx === -1) weightIdx = 4;
-      if (minQtyIdx === -1 && maxQtyIdx === -1) {
-        minQtyIdx = 5;
-        maxQtyIdx = 6;
-      } else if (maxQtyIdx === -1) {
-        maxQtyIdx = minQtyIdx !== -1 ? minQtyIdx : 6;
+      
+      const isOld10Col = headerParts.length >= 10 || (minQtyIdx !== -1 && minQtyIdx !== qtyIdx);
+      if (qtyIdx === -1) {
+        qtyIdx = isOld10Col ? 6 : 5;
       }
-      if (rotIdx === -1) rotIdx = 7;
-      if (colorIdx === -1) colorIdx = 8;
-      if (fragileIdx === -1 && headerParts.length >= 10) fragileIdx = 9;
+      if (rotIdx === -1) rotIdx = isOld10Col ? 7 : 6;
+      if (colorIdx === -1) colorIdx = isOld10Col ? 8 : 7;
+      if (fragileIdx === -1) fragileIdx = isOld10Col ? 9 : 8;
 
       const newItems: CargoItem[] = [];
       for (let i = 1; i < lines.length; i++) {
@@ -238,9 +227,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         const itemHeight = Number(parts[heightIdx]) || 1000;
         const itemDepth = Number(parts[depthIdx]) || 1000;
         const itemWeight = Number(parts[weightIdx]) || 50;
-        const minQty = Number(parts[minQtyIdx]) || 1;
-        const maxQty = Number(parts[maxQtyIdx]) || minQty || 1;
-        const allow3DRot = parts[rotIdx] === '1' || parts[rotIdx]?.toLowerCase() === 'true';
+        const itemQty = Number(parts[qtyIdx]) || (minQtyIdx !== -1 ? Number(parts[minQtyIdx]) : 1) || 1;
+        const rawRot = parts[rotIdx]?.toLowerCase();
+        const allowRot = rotIdx === -1 || rawRot === '1' || rawRot === 'true' || rawRot === 'yes' || rawRot === 'ok';
         const rawColor = parts[colorIdx];
         const validHex = /^#[0-9A-Fa-f]{6}$/.test(rawColor) ? rawColor : COLOR_PALETTE[(i - 1) % COLOR_PALETTE.length];
 
@@ -262,13 +251,11 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           height: itemHeight,
           length: itemDepth,
           weight: itemWeight,
-          quantity: maxQty,
-          minQuantity: minQty,
-          maxQuantity: maxQty,
+          quantity: Math.max(1, itemQty),
           color: validHex,
-          allowTilt: allow3DRot,
-          allowRoll: allow3DRot,
-          allowYaw: true,
+          allowTilt: false,
+          allowRoll: false,
+          allowYaw: allowRot,
           maxStackWeight: isFragile ? 0 : (itemHeight > 1800 ? 0 : 150),
           fragile: isFragile,
           priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3)
@@ -328,7 +315,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           <label 
             id="import-csv-label" 
             className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer font-medium flex items-center gap-1.5 transition-colors"
-            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,最小個数,最大個数,3D回転許可,カラー,割れ物)' : 'Import from CSV'}
+            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,個数,横回転許可,カラー,割れ物)' : 'Import from CSV'}
           >
             <Upload className="w-3.5 h-3.5 text-emerald-600" />
             <span>{isJa ? 'CSV取込' : 'Import'}</span>
@@ -414,8 +401,8 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-3">
+            <div className="sm:col-span-1">
               <label className="text-slate-600 font-medium text-[10px] block mb-1">{isJa ? '貨物名 / 型番' : 'Cargo Name / Model'}</label>
               <input
                 type="text"
@@ -427,24 +414,13 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               />
             </div>
             <div>
-              <label className="text-slate-600 font-medium text-[10px] block mb-1">{isJa ? '最小個数' : 'Min Qty'}</label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={newItem.minQuantity || 1}
-                onChange={e => setNewItem({ ...newItem, minQuantity: Number(e.target.value) })}
-                className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-800 font-bold focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-slate-600 font-medium text-[10px] block mb-1">{isJa ? '最大個数 (数量)' : 'Max Qty'}</label>
+              <label className="text-slate-600 font-medium text-[10px] block mb-1">{isJa ? '個数 (数量)' : 'Quantity'}</label>
               <input
                 type="number"
                 min="1"
                 required
                 value={newItem.quantity}
-                onChange={e => setNewItem({ ...newItem, quantity: Number(e.target.value), maxQuantity: Number(e.target.value) })}
+                onChange={e => setNewItem({ ...newItem, quantity: Math.max(1, parseInt(e.target.value) || 1) })}
                 className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-amber-600 font-bold focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
               />
             </div>
@@ -530,15 +506,16 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-700 font-medium">
                 <input
                   type="checkbox"
-                  checked={newItem.allowTilt && newItem.allowRoll}
+                  checked={newItem.allowYaw !== false}
                   onChange={e => setNewItem({ 
                     ...newItem, 
-                    allowTilt: e.target.checked, 
-                    allowRoll: e.target.checked 
+                    allowYaw: e.target.checked,
+                    allowTilt: false, 
+                    allowRoll: false 
                   })}
                   className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span>{isJa ? '3D回転許可 (1/0)' : 'Allow 3D Rotation'}</span>
+                <span>{isJa ? '横回転許可 (1/0)' : 'Allow Horizontal Rotation'}</span>
               </label>
 
               <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-red-700 font-medium">
@@ -602,17 +579,18 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => handleUpdateItem(cargo.id, { 
-                            allowTilt: !(cargo.allowTilt && cargo.allowRoll),
-                            allowRoll: !(cargo.allowTilt && cargo.allowRoll)
+                            allowYaw: cargo.allowYaw === false ? true : false,
+                            allowTilt: false,
+                            allowRoll: false
                           })}
-                          title={isJa ? 'クリックで3D回転許可を切替' : 'Click to toggle 3D rotation'}
+                          title={isJa ? 'クリックで横回転許可(天面維持・90度旋回)を切替' : 'Click to toggle horizontal rotation (keeping height upright)'}
                           className={`text-[9px] px-1.5 py-0.5 rounded font-semibold cursor-pointer transition-colors border ${
-                            cargo.allowTilt && cargo.allowRoll 
+                            cargo.allowYaw !== false 
                               ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
                               : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
                           }`}
                         >
-                          3D回転:{cargo.allowTilt && cargo.allowRoll ? '1' : '0'}
+                          {isJa ? `横回転:${cargo.allowYaw !== false ? '1' : '0'}` : `Horizontal:${cargo.allowYaw !== false ? '1' : '0'}`}
                         </button>
 
                         <button
@@ -662,8 +640,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                         onChange={(e) => {
                           const val = Math.max(1, Number(e.target.value) || 1);
                           handleUpdateItem(cargo.id, { 
-                            quantity: val,
-                            maxQuantity: val
+                            quantity: val
                           });
                         }}
                         className="w-12 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"

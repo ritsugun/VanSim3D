@@ -21,7 +21,8 @@ interface UnpackedInstance {
 }
 
 /**
- * Generates all permitted 3D rotations for a cargo item based on its rotation flags
+ * Generates all permitted orientations for a cargo item based on horizontal rotation flag.
+ * Vertical rotation (changing height/tilting) is strictly prohibited.
  */
 function getValidOrientations(item: CargoItem): BoxOrientation[] {
   const { length: l, width: w, height: h } = item;
@@ -36,30 +37,17 @@ function getValidOrientations(item: CargoItem): BoxOrientation[] {
     }
   };
 
-  // Orientation 0: Original (L, W, H)
+  // Orientation 0: Original upright orientation (L, W, H)
   pushUnique(l, w, h, 0);
 
-  // Yaw rotation (swap L and W, Height remains upright)
-  if (item.allowYaw || item.allowYaw === undefined) {
+  // Horizontal / Yaw rotation (swap L and W, Height H remains strictly upright)
+  // Allowed when allowYaw is true (or undefined by default)
+  const canRotateHorizontal = item.allowYaw !== false;
+  if (canRotateHorizontal) {
     pushUnique(w, l, h, 1);
   }
 
-  // Roll rotation (swap W and H) - Only if allowed
-  if (item.allowRoll && !item.fragile) {
-    pushUnique(l, h, w, 2);
-    if (item.allowYaw) {
-      pushUnique(h, l, w, 3);
-    }
-  }
-
-  // Tilt rotation (swap L and H) - Only if allowed
-  if (item.allowTilt && !item.fragile) {
-    pushUnique(h, w, l, 4);
-    if (item.allowYaw) {
-      pushUnique(w, h, l, 5);
-    }
-  }
-
+  // Note: Vertical rotations (Tilt / Roll) are disabled to ensure cargo is never stood on its side or flipped vertically.
   return orientations;
 }
 
