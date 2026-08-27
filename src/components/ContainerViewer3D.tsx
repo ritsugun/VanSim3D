@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Container, PackedItem, UnitSystem, Language } from '../types';
+import { Container, PackedItem, UnitSystem, Language, ContainerLoad } from '../types';
 import { 
   Play, Pause, SkipBack, SkipForward, RotateCcw, 
-  Eye, Layers, Camera, Maximize2, ShieldAlert, 
-  Compass, Crosshair, Sparkles, SlidersHorizontal, Info, Box
+  Layers, Camera, Maximize2, ShieldAlert, 
+  Compass, Crosshair, SlidersHorizontal, Box, Grid3X3
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 
 interface ContainerViewer3DProps {
   container: Container;
+  containers?: ContainerLoad[];
+  activeContainerIndex?: number | 'all';
+  onChangeActiveContainerIndex?: (index: number | 'all') => void;
   packedItems: PackedItem[];
   centerOfGravity: { x: number; y: number; z: number };
   unitSystem: UnitSystem;
@@ -21,6 +24,9 @@ interface ContainerViewer3DProps {
 
 export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   container,
+  containers,
+  activeContainerIndex = 0,
+  onChangeActiveContainerIndex,
   packedItems,
   centerOfGravity,
   unitSystem,
@@ -34,16 +40,40 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const boxMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
-  const cogMeshRef = useRef<THREE.Group | null>(null);
-  const containerGroupRef = useRef<THREE.Group | null>(null);
+  const cogGroupRef = useRef<THREE.Group | null>(null);
+  const containersGroupRef = useRef<THREE.Group | null>(null);
 
   // Interaction & Display States
-  const [currentStep, setCurrentStep] = useState<number>(packedItems.length);
+  const [internalActiveTab, setInternalActiveTab] = useState<number | 'all'>(activeContainerIndex);
+  const [sceneReady, setSceneReady] = useState<number>(0);
+  const [webglError, setWebglError] = useState<string | null>(null);
+  const currentTab = onChangeActiveContainerIndex ? activeContainerIndex : internalActiveTab;
+  const setTab = (tab: number | 'all') => {
+    if (onChangeActiveContainerIndex) {
+      onChangeActiveContainerIndex(tab);
+    } else {
+      setInternalActiveTab(tab);
+    }
+  };
+
+  // Active items based on selected tab
+  const activeItemsToDisplay = useMemo(() => {
+    if (containers && containers.length > 0) {
+      if (currentTab === 'all') {
+        return containers.flatMap(c => c.packedItems);
+      }
+      const targetIdx = typeof currentTab === 'number' ? currentTab : 0;
+      const target = containers[targetIdx] || containers[0];
+      return target.packedItems;
+    }
+    return packedItems;
+  }, [containers, currentTab, packedItems]);
+
+  const [currentStep, setCurrentStep] = useState<number>(activeItemsToDisplay.length);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [showCoG, setShowCoG] = useState<boolean>(true);
   const [showWireframeOnly, setShowWireframeOnly] = useState<boolean>(false);
-  const [showDimensions, setShowDimensions] = useState<boolean>(true);
   const [colorMode, setColorMode] = useState<'cargo' | 'weight' | 'sequence'>('cargo');
   const [zSlicePercent, setZSlicePercent] = useState<number>(100);
   const [xSlicePercent, setXSlicePercent] = useState<number>(100);
@@ -55,14 +85,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
   // Max weight for weight color mapping
   const maxItemWeight = useMemo(() => {
-    return Math.max(1, ...packedItems.map(p => p.weight));
-  }, [packedItems]);
+    return Math.max(1, ...activeItemsToDisplay.map(p => p.weight));
+  }, [activeItemsToDisplay]);
 
-  // Sync currentStep when packedItems changes
+  // Sync currentStep when items change
   useEffect(() => {
-    setCurrentStep(packedItems.length);
+    setCurrentStep(activeItemsToDisplay.length);
     setIsPlaying(false);
-  }, [packedItems]);
+  }, [activeItemsToDisplay]);
 
   // Playback timer
   useEffect(() => {
@@ -70,9 +100,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     if (isPlaying) {
       interval = setInterval(() => {
         setCurrentStep(prev => {
-          if (prev >= packedItems.length) {
+          if (prev >= activeItemsToDisplay.length) {
             setIsPlaying(false);
-            return packedItems.length;
+            return activeItemsToDisplay.length;
           }
           return prev + 1;
         });
@@ -81,174 +111,206 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isPlaying, playbackSpeed, packedItems.length]);
+  }, [isPlaying, playbackSpeed, activeItemsToDisplay.length]);
 
   // Initialize Three.js Scene
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight || 560;
+    try {
+      const width = Math.max(containerRef.current.clientWidth || 600, 300);
+      const height = Math.max(containerRef.current.clientHeight || 560, 300);
 
-    // Scale down mm to meters for Three.js coordinates (1 meter = 1000 mm = 1.0 unit in 3D)
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf8fafc); // Slate 50 clean neutral background
-    sceneRef.current = scene;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xf8fafc); // Slate 50 neutral background
+      sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 100);
-    cameraRef.current = camera;
+      const camera = new THREE.PerspectiveCamera(42, width / height, 0.1, 200);
+      cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    rendererRef.current = renderer;
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      rendererRef.current = renderer;
 
-    containerRef.current.innerHTML = '';
-    containerRef.current.appendChild(renderer.domElement);
+      containerRef.current.innerHTML = '';
+      containerRef.current.appendChild(renderer.domElement);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 + 0.05; // Don't go below floor
-    controlsRef.current = controls;
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.maxPolarAngle = Math.PI / 2 + 0.05;
+      controlsRef.current = controls;
 
-    // Lighting setup
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
-    scene.add(ambientLight);
+      // Lighting setup
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+      scene.add(ambientLight);
 
-    const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight1.position.set(10, 20, 15);
-    dirLight1.castShadow = true;
-    dirLight1.shadow.mapSize.width = 2048;
-    dirLight1.shadow.mapSize.height = 2048;
-    scene.add(dirLight1);
+      const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
+      dirLight1.position.set(15, 25, 20);
+      dirLight1.castShadow = true;
+      dirLight1.shadow.mapSize.width = 2048;
+      dirLight1.shadow.mapSize.height = 2048;
+      scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0x94a3b8, 0.45);
-    dirLight2.position.set(-15, 10, -10);
-    scene.add(dirLight2);
+      const dirLight2 = new THREE.DirectionalLight(0x94a3b8, 0.45);
+      dirLight2.position.set(-15, 15, -15);
+      scene.add(dirLight2);
 
-    // Initial Camera Position
-    const contLengthM = container.length / 1000;
-    const contHeightM = container.height / 1000;
-    const contWidthM = container.width / 1000;
+      // Initial Camera Position
+      const contLengthM = container.length / 1000;
+      const contHeightM = container.height / 1000;
+      const contWidthM = container.width / 1000;
 
-    camera.position.set(contLengthM * 1.5, contHeightM * 1.8, contWidthM * 2.2);
-    controls.target.set(contLengthM / 2, contHeightM / 2, contWidthM / 2);
-    controls.update();
-
-    // Render loop
-    let animationFrameId: number;
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
+      camera.position.set(contLengthM * 1.5, contHeightM * 1.8, contWidthM * 2.2);
+      controls.target.set(contLengthM / 2, contHeightM / 2, contWidthM / 2);
       controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
 
-    // Resize observer
-    const handleResize = () => {
-      if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-      const newW = containerRef.current.clientWidth;
-      const newH = containerRef.current.clientHeight || 560;
-      cameraRef.current.aspect = newW / newH;
-      cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(newW, newH);
-    };
+      // Signal scene is ready for mesh population
+      setSceneReady(prev => prev + 1);
 
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(containerRef.current);
+      // Render loop
+      let animationFrameId: number;
+      const animate = () => {
+        animationFrameId = requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      };
+      animate();
 
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      resizeObserver.disconnect();
-      renderer.dispose();
-    };
+      // Resize observer
+      const handleResize = () => {
+        if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
+        const newW = containerRef.current.clientWidth;
+        const newH = containerRef.current.clientHeight || 560;
+        if (newW > 0 && newH > 0) {
+          cameraRef.current.aspect = newW / newH;
+          cameraRef.current.updateProjectionMatrix();
+          rendererRef.current.setSize(newW, newH);
+        }
+      };
+
+      const resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(containerRef.current);
+
+      return () => {
+        cancelAnimationFrame(animationFrameId);
+        resizeObserver.disconnect();
+        if (rendererRef.current) {
+          rendererRef.current.dispose();
+          rendererRef.current = null;
+        }
+        sceneRef.current = null;
+      };
+    } catch (err: any) {
+      console.error('Three.js / WebGL initialization error:', err);
+      setWebglError(err?.message || 'WebGL not supported or failed to initialize');
+    }
   }, []);
 
-  // Update Container Geometry & Visual Walls
+  // Update Container Geometry & Visual Walls (Supports single or multi side-by-side)
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (containerGroupRef.current) {
-      scene.remove(containerGroupRef.current);
+    if (containersGroupRef.current) {
+      scene.remove(containersGroupRef.current);
     }
 
-    const cGroup = new THREE.Group();
-    containerGroupRef.current = cGroup;
+    const allContainersGroup = new THREE.Group();
+    containersGroupRef.current = allContainersGroup;
 
     const lenM = container.length / 1000;
     const widM = container.width / 1000;
     const heiM = container.height / 1000;
 
-    // Floor Plane
-    const floorGeo = new THREE.PlaneGeometry(lenM, widM);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0xe2e8f0, // Slate 200 clean floor
-      roughness: 0.9,
-      metalness: 0.1,
-      side: THREE.DoubleSide
-    });
-    const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-    floorMesh.rotation.x = Math.PI / 2;
-    floorMesh.position.set(lenM / 2, 0, widM / 2);
-    floorMesh.receiveShadow = true;
-    cGroup.add(floorMesh);
+    const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
+    const countToRender = isSideBySide ? containers.length : 1;
+    const spacingM = widM + 1.2;
 
-    // Floor Grid lines (every 1m)
-    const gridHelper = new THREE.GridHelper(Math.max(lenM, widM) * 1.5, 30, 0x94a3b8, 0xcbd5e1);
-    gridHelper.position.set(lenM / 2, -0.005, widM / 2);
-    cGroup.add(gridHelper);
+    for (let cIdx = 0; cIdx < countToRender; cIdx++) {
+      const zOffsetM = isSideBySide ? cIdx * spacingM : 0;
+      const singleGroup = new THREE.Group();
 
-    // Bounding Box Outline (Wireframe container)
-    const boxGeo = new THREE.BoxGeometry(lenM, heiM, widM);
-    const edges = new THREE.EdgesGeometry(boxGeo);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 2 });
-    const wireframe = new THREE.LineSegments(edges, lineMat);
-    wireframe.position.set(lenM / 2, heiM / 2, widM / 2);
-    cGroup.add(wireframe);
+      // Floor Plane
+      const floorGeo = new THREE.PlaneGeometry(lenM, widM);
+      const floorMat = new THREE.MeshStandardMaterial({
+        color: 0xe2e8f0,
+        roughness: 0.9,
+        metalness: 0.1,
+        side: THREE.DoubleSide
+      });
+      const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+      floorMesh.rotation.x = Math.PI / 2;
+      floorMesh.position.set(lenM / 2, 0, widM / 2 + zOffsetM);
+      floorMesh.receiveShadow = true;
+      singleGroup.add(floorMesh);
 
-    // Semi-transparent side walls and roof
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x3b82f6,
-      transparent: true,
-      opacity: 0.04,
-      roughness: 0.1,
-      metalness: 0.1,
-      side: THREE.BackSide
-    });
-    const wallMesh = new THREE.Mesh(boxGeo, wallMat);
-    wallMesh.position.set(lenM / 2, heiM / 2, widM / 2);
-    cGroup.add(wallMesh);
+      // Floor Grid lines
+      const gridHelper = new THREE.GridHelper(Math.max(lenM, widM) * 1.5, 30, 0x94a3b8, 0xcbd5e1);
+      gridHelper.position.set(lenM / 2, -0.005, widM / 2 + zOffsetM);
+      singleGroup.add(gridHelper);
 
-    // Cargo Door Indicator at the front (X = Length)
-    const doorFrameGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(lenM, 0, 0),
-      new THREE.Vector3(lenM, heiM, 0),
-      new THREE.Vector3(lenM, heiM, widM),
-      new THREE.Vector3(lenM, 0, widM),
-      new THREE.Vector3(lenM, 0, 0)
-    ]);
-    const doorMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 3 });
-    const doorLines = new THREE.Line(doorFrameGeo, doorMat);
-    cGroup.add(doorLines);
+      // Bounding Box Outline (Wireframe container)
+      const boxGeo = new THREE.BoxGeometry(lenM, heiM, widM);
+      const edges = new THREE.EdgesGeometry(boxGeo);
+      const lineMat = new THREE.LineBasicMaterial({ 
+        color: isSideBySide ? (cIdx === 0 ? 0x2563eb : 0x7c3aed) : 0x2563eb, 
+        linewidth: 2 
+      });
+      const wireframe = new THREE.LineSegments(edges, lineMat);
+      wireframe.position.set(lenM / 2, heiM / 2, widM / 2 + zOffsetM);
+      singleGroup.add(wireframe);
 
-    // Dimension labels / markers
-    // Origin marker (0,0,0)
-    const originAxes = new THREE.AxesHelper(Math.min(lenM, widM, heiM) * 0.4);
-    originAxes.position.set(0, 0.01, 0);
-    cGroup.add(originAxes);
+      // Semi-transparent side walls and roof
+      const wallMat = new THREE.MeshStandardMaterial({
+        color: 0x3b82f6,
+        transparent: true,
+        opacity: 0.04,
+        roughness: 0.1,
+        metalness: 0.1,
+        side: THREE.BackSide
+      });
+      const wallMesh = new THREE.Mesh(boxGeo, wallMat);
+      wallMesh.position.set(lenM / 2, heiM / 2, widM / 2 + zOffsetM);
+      singleGroup.add(wallMesh);
 
-    scene.add(cGroup);
+      // Cargo Door Indicator at the front (X = Length)
+      const doorFrameGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(lenM, 0, zOffsetM),
+        new THREE.Vector3(lenM, heiM, zOffsetM),
+        new THREE.Vector3(lenM, heiM, widM + zOffsetM),
+        new THREE.Vector3(lenM, 0, widM + zOffsetM),
+        new THREE.Vector3(lenM, 0, zOffsetM)
+      ]);
+      const doorMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 3 });
+      const doorLines = new THREE.Line(doorFrameGeo, doorMat);
+      singleGroup.add(doorLines);
+
+      // Origin Axes Marker
+      const originAxes = new THREE.AxesHelper(Math.min(lenM, widM, heiM) * 0.35);
+      originAxes.position.set(0, 0.01, zOffsetM);
+      singleGroup.add(originAxes);
+
+      allContainersGroup.add(singleGroup);
+    }
+
+    scene.add(allContainersGroup);
 
     // Re-center camera controls target
     if (controlsRef.current && cameraRef.current) {
-      controlsRef.current.target.set(lenM / 2, heiM / 2, widM / 2);
+      if (isSideBySide) {
+        const totalZ = (countToRender - 1) * spacingM + widM;
+        controlsRef.current.target.set(lenM / 2, heiM / 2, totalZ / 2);
+        cameraRef.current.position.set(lenM * 1.6, heiM * 2.2 + totalZ * 0.4, totalZ * 1.3);
+      } else {
+        controlsRef.current.target.set(lenM / 2, heiM / 2, widM / 2);
+      }
       controlsRef.current.update();
     }
-  }, [container]);
+  }, [container, currentTab, containers, sceneReady]);
 
   // Update Cargo Box Meshes in Three.js Scene
   useEffect(() => {
@@ -258,19 +320,27 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     // Remove old box meshes
     boxMeshesRef.current.forEach(mesh => {
       scene.remove(mesh);
-      mesh.geometry.dispose();
-      if (Array.isArray(mesh.material)) {
-        mesh.material.forEach(m => m.dispose());
-      } else {
-        mesh.material.dispose();
-      }
+      mesh.traverse((child) => {
+        if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof THREE.Line) {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        }
+      });
     });
     boxMeshesRef.current.clear();
 
     const maxZLimit = (container.height * zSlicePercent) / 100;
     const maxXLimit = (container.length * xSlicePercent) / 100;
+    const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
+    const spacingM = (container.width / 1000) + 1.2;
 
-    packedItems.slice(0, currentStep).forEach((item) => {
+    activeItemsToDisplay.slice(0, currentStep).forEach((item) => {
       // Slicing filters
       if (item.z > maxZLimit || item.x > maxXLimit) {
         return;
@@ -283,18 +353,20 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const yM = item.y / 1000;
       const zM = item.z / 1000;
 
+      // In side-by-side mode, offset each item by its container index along Z-axis
+      const itemContIdx = typeof item.containerIndex === 'number' ? item.containerIndex : 0;
+      const containerOffsetZ = isSideBySide ? itemContIdx * spacingM : 0;
+
       const isSelected = activeSelectedItem?.id === item.id;
       const isHovered = hoveredItem?.id === item.id;
 
       // Color mapping
       let boxColor = new THREE.Color(item.color || '#3b82f6');
       if (colorMode === 'weight') {
-        // Gradient from Green (Light) to Red (Heavy)
         const weightRatio = item.weight / maxItemWeight;
         boxColor = new THREE.Color().setHSL(0.33 * (1 - weightRatio), 0.85, 0.5);
       } else if (colorMode === 'sequence') {
-        // Gradient along sequence
-        const seqRatio = item.sequenceNumber / Math.max(1, packedItems.length);
+        const seqRatio = item.sequenceNumber / Math.max(1, activeItemsToDisplay.length);
         boxColor = new THREE.Color().setHSL(seqRatio * 0.8, 0.8, 0.5);
       }
 
@@ -322,11 +394,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       mesh.position.set(
         xM + lenM / 2,
         zM + heiM / 2,
-        yM + widM / 2
+        yM + widM / 2 + containerOffsetZ
       );
       mesh.userData = { packedItem: item };
 
-      // Add crisp edges outline
+      // Edges outline
       const edgesGeo = new THREE.EdgesGeometry(boxGeo);
       const edgeLineMat = new THREE.LineBasicMaterial({
         color: isSelected ? 0x000000 : 0x1e293b,
@@ -339,9 +411,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       boxMeshesRef.current.set(item.id, mesh);
     });
   }, [
-    packedItems, currentStep, colorMode, showWireframeOnly, 
+    activeItemsToDisplay, currentStep, colorMode, showWireframeOnly, 
     zSlicePercent, xSlicePercent, hoveredItem, activeSelectedItem, 
-    maxItemWeight, container
+    maxItemWeight, container, currentTab, containers, sceneReady
   ]);
 
   // Center of Gravity 3D Marker
@@ -349,60 +421,112 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (cogMeshRef.current) {
-      scene.remove(cogMeshRef.current);
+    if (cogGroupRef.current) {
+      scene.remove(cogGroupRef.current);
     }
 
-    if (!showCoG || packedItems.length === 0) return;
+    if (!showCoG || activeItemsToDisplay.length === 0) return;
 
-    const cogGroup = new THREE.Group();
-    cogMeshRef.current = cogGroup;
+    const allCogGroup = new THREE.Group();
+    cogGroupRef.current = allCogGroup;
 
-    const cogXM = centerOfGravity.x / 1000;
-    const cogYM = centerOfGravity.y / 1000;
-    const cogZM = centerOfGravity.z / 1000;
+    const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
+    const spacingM = (container.width / 1000) + 1.2;
 
-    // Glowing Sphere
-    const sphereGeo = new THREE.SphereGeometry(0.12, 24, 24);
-    const sphereMat = new THREE.MeshStandardMaterial({
-      color: 0xef4444, // Red
-      emissive: 0xef4444,
-      emissiveIntensity: 0.6,
-      roughness: 0.2
-    });
-    const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
-    sphereMesh.position.set(cogXM, cogZM, cogYM);
-    cogGroup.add(sphereMesh);
+    if (isSideBySide) {
+      // Render CoG for each individual container
+      containers.forEach((cLoad, cIdx) => {
+        if (cLoad.packedItems.length === 0) return;
+        const cCog = cLoad.metrics.centerOfGravity;
+        const cogXM = cCog.x / 1000;
+        const cogYM = cCog.y / 1000 + cIdx * spacingM;
+        const cogZM = cCog.z / 1000;
 
-    // Floor Target Shadow / Crosshair
-    const targetGeo = new THREE.RingGeometry(0.15, 0.25, 32);
-    const targetMat = new THREE.MeshBasicMaterial({
-      color: 0xef4444,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.8
-    });
-    const targetMesh = new THREE.Mesh(targetGeo, targetMat);
-    targetMesh.rotation.x = Math.PI / 2;
-    targetMesh.position.set(cogXM, 0.02, cogYM);
-    cogGroup.add(targetMesh);
+        const sphereGeo = new THREE.SphereGeometry(0.12, 24, 24);
+        const sphereMat = new THREE.MeshStandardMaterial({
+          color: 0xef4444,
+          emissive: 0xef4444,
+          emissiveIntensity: 0.6,
+          roughness: 0.2
+        });
+        const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+        sphereMesh.position.set(cogXM, cogZM, cogYM);
+        allCogGroup.add(sphereMesh);
 
-    // Vertical line connecting sphere to floor target
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(cogXM, 0.02, cogYM),
-      new THREE.Vector3(cogXM, cogZM, cogYM)
-    ]);
-    const lineMat = new THREE.LineDashedMaterial({
-      color: 0xef4444,
-      dashSize: 0.05,
-      gapSize: 0.03
-    });
-    const line = new THREE.Line(lineGeo, lineMat);
-    line.computeLineDistances();
-    cogGroup.add(line);
+        const targetGeo = new THREE.RingGeometry(0.15, 0.25, 32);
+        const targetMat = new THREE.MeshBasicMaterial({
+          color: 0xef4444,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.8
+        });
+        const targetMesh = new THREE.Mesh(targetGeo, targetMat);
+        targetMesh.rotation.x = Math.PI / 2;
+        targetMesh.position.set(cogXM, 0.02, cogYM);
+        allCogGroup.add(targetMesh);
 
-    scene.add(cogGroup);
-  }, [centerOfGravity, showCoG, packedItems.length]);
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(cogXM, 0.02, cogYM),
+          new THREE.Vector3(cogXM, cogZM, cogYM)
+        ]);
+        const lineMat = new THREE.LineDashedMaterial({
+          color: 0xef4444,
+          dashSize: 0.05,
+          gapSize: 0.03
+        });
+        const line = new THREE.Line(lineGeo, lineMat);
+        line.computeLineDistances();
+        allCogGroup.add(line);
+      });
+    } else {
+      // Single container CoG
+      const currentCoG = (typeof currentTab === 'number' && containers && containers[currentTab])
+        ? containers[currentTab].metrics.centerOfGravity
+        : centerOfGravity;
+
+      const cogXM = currentCoG.x / 1000;
+      const cogYM = currentCoG.y / 1000;
+      const cogZM = currentCoG.z / 1000;
+
+      const sphereGeo = new THREE.SphereGeometry(0.12, 24, 24);
+      const sphereMat = new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0xef4444,
+        emissiveIntensity: 0.6,
+        roughness: 0.2
+      });
+      const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+      sphereMesh.position.set(cogXM, cogZM, cogYM);
+      allCogGroup.add(sphereMesh);
+
+      const targetGeo = new THREE.RingGeometry(0.15, 0.25, 32);
+      const targetMat = new THREE.MeshBasicMaterial({
+        color: 0xef4444,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.8
+      });
+      const targetMesh = new THREE.Mesh(targetGeo, targetMat);
+      targetMesh.rotation.x = Math.PI / 2;
+      targetMesh.position.set(cogXM, 0.02, cogYM);
+      allCogGroup.add(targetMesh);
+
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(cogXM, 0.02, cogYM),
+        new THREE.Vector3(cogXM, cogZM, cogYM)
+      ]);
+      const lineMat = new THREE.LineDashedMaterial({
+        color: 0xef4444,
+        dashSize: 0.05,
+        gapSize: 0.03
+      });
+      const line = new THREE.Line(lineGeo, lineMat);
+      line.computeLineDistances();
+      allCogGroup.add(line);
+    }
+
+    scene.add(allCogGroup);
+  }, [centerOfGravity, showCoG, activeItemsToDisplay.length, currentTab, containers, container, sceneReady]);
 
   // Raycasting for Mouse Hover & Click
   useEffect(() => {
@@ -464,26 +588,27 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   }, [onSelectItem]);
 
   // Camera preset views
-  const setCameraView = (type: 'iso' | 'top' | 'side' | 'front' | 'door') => {
+  const setCameraView = (type: 'iso' | 'top' | 'side' | 'door') => {
     if (!cameraRef.current || !controlsRef.current) return;
     const lenM = container.length / 1000;
     const widM = container.width / 1000;
     const heiM = container.height / 1000;
-    const target = new THREE.Vector3(lenM / 2, heiM / 2, widM / 2);
+    const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
+    const spacingM = widM + 1.2;
+    const count = isSideBySide ? containers.length : 1;
+    const totalZ = (count - 1) * spacingM + widM;
+
+    const target = new THREE.Vector3(lenM / 2, heiM / 2, totalZ / 2);
     controlsRef.current.target.copy(target);
 
     if (type === 'iso') {
-      cameraRef.current.position.set(lenM * 1.5, heiM * 1.8, widM * 2.2);
+      cameraRef.current.position.set(lenM * 1.5, heiM * 1.8, totalZ * 1.4);
     } else if (type === 'top') {
-      cameraRef.current.position.set(lenM / 2, heiM * 3.5, widM / 2 + 0.001);
+      cameraRef.current.position.set(lenM / 2, heiM * 3.5 + totalZ * 0.5, totalZ / 2 + 0.001);
     } else if (type === 'side') {
-      cameraRef.current.position.set(lenM / 2, heiM / 2, widM * 3.2);
-    } else if (type === 'front') {
-      // Rear/Front view looking down length
-      cameraRef.current.position.set(-lenM * 1.5, heiM / 2, widM / 2);
+      cameraRef.current.position.set(lenM / 2, heiM / 2, totalZ * 2.5);
     } else if (type === 'door') {
-      // Looking directly into the open cargo doors (X = Length)
-      cameraRef.current.position.set(lenM * 2.4, heiM * 0.8, widM / 2);
+      cameraRef.current.position.set(lenM * 2.4, heiM * 0.8, totalZ / 2);
     }
     controlsRef.current.update();
   };
@@ -499,6 +624,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   };
 
   const isJa = language === 'ja';
+  const hasMultipleContainers = containers && containers.length > 1;
 
   return (
     <div 
@@ -510,17 +636,70 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       {/* 3D Canvas Viewport */}
       <div 
         ref={containerRef} 
-        className="w-full flex-1 relative bg-slate-50 select-none outline-none"
-      />
+        className="w-full flex-1 relative bg-slate-50 select-none outline-none min-h-[400px]"
+      >
+        {webglError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-slate-50 text-slate-700 space-y-3">
+            <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900 text-sm">3Dグラフィックス (WebGL) の初期化中または非対応です</p>
+              <p className="text-xs text-slate-500 mt-1">{webglError}</p>
+            </div>
+            <button
+              onClick={() => window.location.reload()}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors"
+            >
+              ページを再読み込み
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* Top Floating View Controls & Quick Badges */}
+      {/* Top Floating Container Selector Tabs & Quick Badges */}
       <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none gap-2 flex-wrap z-10">
-        <div className="flex items-center gap-2 pointer-events-auto bg-white/90 backdrop-blur-md px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-800">
-          <Box className="w-4 h-4 text-blue-600" />
+        <div className="flex items-center gap-1.5 pointer-events-auto bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-800 flex-wrap">
+          <Box className="w-4 h-4 text-blue-600 shrink-0" />
           <span className="font-semibold text-slate-900">{container.name}</span>
-          <span className="text-slate-300">|</span>
+
+          {hasMultipleContainers && (
+            <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
+              {containers.map((cLoad, idx) => {
+                const isActive = currentTab === idx;
+                return (
+                  <button
+                    key={cLoad.containerIndex}
+                    type="button"
+                    onClick={() => setTab(idx)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    #{idx + 1} ({(cLoad.metrics.volumeUtilization || 0).toFixed(0)}%)
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setTab('all')}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-all ${
+                  currentTab === 'all'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <Grid3X3 className="w-3 h-3" />
+                <span>{isJa ? '全台並列' : 'Side-by-Side'}</span>
+              </button>
+            </div>
+          )}
+
+          <span className="text-slate-300 mx-1">|</span>
           <span className="text-emerald-600 font-mono font-bold">
-            {packedItems.length} {isJa ? '個 積載完了' : 'Boxes Loaded'}
+            {activeItemsToDisplay.length} {isJa ? '個 積載' : 'Boxes'}
           </span>
         </div>
 
@@ -600,9 +779,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 {(activeSelectedItem || hoveredItem)?.name}
               </span>
             </div>
-            <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-blue-200">
-              #{(activeSelectedItem || hoveredItem)?.sequenceNumber}
-            </span>
+            <div className="flex items-center gap-1">
+              {(activeSelectedItem || hoveredItem)?.containerIndex && (
+                <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-purple-200">
+                  C#{(activeSelectedItem || hoveredItem)?.containerIndex}
+                </span>
+              )}
+              <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-blue-200">
+                #{(activeSelectedItem || hoveredItem)?.sequenceNumber}
+              </span>
+            </div>
           </div>
 
           {(() => {
@@ -750,7 +936,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           <button
             id="seq-play-pause-btn"
             onClick={() => {
-              if (currentStep >= packedItems.length) {
+              if (currentStep >= activeItemsToDisplay.length) {
                 setCurrentStep(0);
               }
               setIsPlaying(!isPlaying);
@@ -773,9 +959,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="seq-next-btn"
             onClick={() => {
               setIsPlaying(false);
-              setCurrentStep(prev => Math.min(packedItems.length, prev + 1));
+              setCurrentStep(prev => Math.min(activeItemsToDisplay.length, prev + 1));
             }}
-            disabled={currentStep >= packedItems.length}
+            disabled={currentStep >= activeItemsToDisplay.length}
             title={isJa ? '次の荷物' : 'Next Step'}
             className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
           >
@@ -805,7 +991,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="loading-step-slider"
             type="range"
             min="0"
-            max={packedItems.length}
+            max={activeItemsToDisplay.length}
             value={currentStep}
             onChange={(e) => {
               setIsPlaying(false);
@@ -814,7 +1000,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             className="flex-1 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
           <span className="font-mono text-white font-bold text-xs whitespace-nowrap min-w-[56px] text-right">
-            {currentStep} / {packedItems.length}
+            {currentStep} / {activeItemsToDisplay.length}
           </span>
         </div>
       </div>

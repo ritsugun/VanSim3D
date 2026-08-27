@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { PackedItem, Language, UnitSystem, Container } from '../types';
+import { PackedItem, Language, UnitSystem, Container, ContainerLoad } from '../types';
 import { 
   ClipboardList, Search, Download, Printer, 
-  ShieldAlert, Check, ArrowUpDown, Filter, Eye 
+  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box 
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 
@@ -13,6 +13,9 @@ interface LoadingGuideTableProps {
   unitSystem: UnitSystem;
   onSelectItem: (item: PackedItem | null) => void;
   selectedItem: PackedItem | null;
+  containers?: ContainerLoad[];
+  activeContainerIndex?: number | 'all';
+  onSelectContainerIndex?: (index: number | 'all') => void;
 }
 
 export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
@@ -21,31 +24,47 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
   language,
   unitSystem,
   onSelectItem,
-  selectedItem
+  selectedItem,
+  containers,
+  activeContainerIndex = 'all',
+  onSelectContainerIndex
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedLayer, setSelectedLayer] = useState<string>('all');
-  const [sortField, setSortField] = useState<'seq' | 'weight' | 'name' | 'z'>('seq');
+  const [selectedContainerFilter, setSelectedContainerFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<'seq' | 'weight' | 'name' | 'z' | 'container'>('seq');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
 
   const isJa = language === 'ja';
+  const hasMultipleContainers = containers && containers.length > 1;
+
+  // All items across all containers or current single container
+  const allPackedItems = useMemo(() => {
+    if (hasMultipleContainers) {
+      return containers.flatMap(c => c.packedItems);
+    }
+    return packedItems;
+  }, [containers, hasMultipleContainers, packedItems]);
 
   // Extract unique layers
   const layers = useMemo(() => {
     const set = new Set<number>();
-    packedItems.forEach(p => set.add(p.layer));
+    allPackedItems.forEach(p => set.add(p.layer));
     return Array.from(set).sort((a, b) => a - b);
-  }, [packedItems]);
+  }, [allPackedItems]);
 
   // Filtered & Sorted items
   const displayItems = useMemo(() => {
-    return packedItems
+    return allPackedItems
       .filter(item => {
         const matchesQuery = 
           item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           item.sku.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesLayer = selectedLayer === 'all' || item.layer === Number(selectedLayer);
-        return matchesQuery && matchesLayer;
+        const matchesContainer = 
+          selectedContainerFilter === 'all' || 
+          (item.containerIndex !== undefined && item.containerIndex === Number(selectedContainerFilter));
+        return matchesQuery && matchesLayer && matchesContainer;
       })
       .sort((a, b) => {
         let cmp = 0;
@@ -53,25 +72,27 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
         else if (sortField === 'weight') cmp = a.weight - b.weight;
         else if (sortField === 'name') cmp = a.name.localeCompare(b.name);
         else if (sortField === 'z') cmp = a.z - b.z;
+        else if (sortField === 'container') cmp = (a.containerIndex || 1) - (b.containerIndex || 1);
         return sortAsc ? cmp : -cmp;
       });
-  }, [packedItems, searchQuery, selectedLayer, sortField, sortAsc]);
+  }, [allPackedItems, searchQuery, selectedLayer, selectedContainerFilter, sortField, sortAsc]);
 
   // Cumulative weight up to each item
   const cumulativeWeights = useMemo(() => {
     const map = new Map<number, number>();
     let sum = 0;
-    packedItems.forEach(p => {
+    allPackedItems.forEach(p => {
       sum += p.weight;
       map.set(p.sequenceNumber, sum);
     });
     return map;
-  }, [packedItems]);
+  }, [allPackedItems]);
 
   // Export Loading Manifest CSV
   const handleExportManifestCsv = () => {
     const headers = [
       '積載順序(No)',
+      'コンテナ番号(Container_No)',
       '貨物名(Item_Name)',
       '管理番号(SKU)',
       '配置X(mm)',
@@ -86,8 +107,9 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
       '天地無用/割れ物'
     ];
 
-    const rows = packedItems.map(p => [
+    const rows = allPackedItems.map(p => [
       p.sequenceNumber,
+      p.containerIndex || 1,
       `"${p.name}"`,
       p.sku,
       p.x,
@@ -127,7 +149,7 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
             <ClipboardList className="w-4 h-4 text-blue-600" />
             {isJa ? '積載指示マニフェスト (Step-by-Step Loading Manifest)' : 'Step-by-Step Loading Guide'}
             <span className="text-xs font-normal text-slate-500 font-mono">
-              ({displayItems.length} / {packedItems.length} {isJa ? '点' : 'items'})
+              ({displayItems.length} / {allPackedItems.length} {isJa ? '点' : 'items'})
             </span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -147,6 +169,22 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
               className="bg-slate-50 border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none w-36 sm:w-44"
             />
           </div>
+
+          {/* Container Filter if multiple containers exist */}
+          {hasMultipleContainers && (
+            <select
+              value={selectedContainerFilter}
+              onChange={e => setSelectedContainerFilter(e.target.value)}
+              className="bg-purple-50 border border-purple-200 text-purple-800 font-semibold rounded-lg px-2.5 py-1.5 text-xs focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none"
+            >
+              <option value="all">{isJa ? '全コンテナ (All Containers)' : 'All Containers'}</option>
+              {containers.map(c => (
+                <option key={c.containerIndex} value={c.containerIndex}>
+                  {isJa ? `コンテナ #${c.containerIndex} (${c.packedItems.length}個)` : `Container #${c.containerIndex} (${c.packedItems.length} pcs)`}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* Layer Filter */}
           <select
@@ -196,6 +234,17 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
                   <ArrowUpDown className="w-3 h-3" />
                 </button>
               </th>
+              {hasMultipleContainers && (
+                <th className="py-2.5 px-3.5 whitespace-nowrap">
+                  <button 
+                    onClick={() => { setSortField('container'); setSortAsc(!sortAsc); }}
+                    className="flex items-center gap-1 hover:text-slate-900"
+                  >
+                    <span>{isJa ? 'コンテナ' : 'Container'}</span>
+                    <ArrowUpDown className="w-3 h-3" />
+                  </button>
+                </th>
+              )}
               <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '品名 / SKU' : 'Item Name & SKU'}</th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
                 {isJa ? `配置座標 (X, Y, Z ${unitSystem === 'imperial' ? 'in' : 'mm'})` : `Position (${unitSystem === 'imperial' ? 'in' : 'mm'})`}
@@ -219,90 +268,91 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
           <tbody className="divide-y divide-slate-100 bg-white font-mono">
             {displayItems.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-8 text-slate-400 text-xs font-sans">
-                  {isJa ? '該当する荷物が見つかりません' : 'No matching items found.'}
+                <td colSpan={hasMultipleContainers ? 8 : 7} className="py-8 text-center text-slate-400 font-sans">
+                  {isJa ? '該当する積載指示データがありません' : 'No items match your filter criteria'}
                 </td>
               </tr>
             ) : (
               displayItems.map((item) => {
                 const isSelected = selectedItem?.id === item.id;
-                const cumWeight = cumulativeWeights.get(item.sequenceNumber) || item.weight;
                 const coords = formatCoordinates(item.x, item.y, item.z, unitSystem);
+                const cumWeight = cumulativeWeights.get(item.sequenceNumber) || item.weight;
 
                 return (
-                  <tr
+                  <tr 
                     key={item.id}
                     onClick={() => onSelectItem(isSelected ? null : item)}
                     className={`cursor-pointer transition-colors ${
-                      isSelected
-                        ? 'bg-blue-50/80 text-blue-900'
-                        : 'hover:bg-slate-50 text-slate-700'
+                      isSelected 
+                        ? 'bg-amber-50/80 text-slate-900 font-semibold' 
+                        : 'hover:bg-blue-50/40 text-slate-700'
                     }`}
                   >
-                    {/* Sequence Badge */}
-                    <td className="py-2.5 px-3.5 whitespace-nowrap font-bold">
-                      <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[11px] border border-blue-200">
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-800 text-[11px] font-bold">
                         #{item.sequenceNumber}
                       </span>
                     </td>
 
-                    {/* Name & SKU */}
+                    {hasMultipleContainers && (
+                      <td className="py-2.5 px-3.5 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                          <Box className="w-3 h-3" />
+                          <span>#{item.containerIndex || 1}</span>
+                        </span>
+                      </td>
+                    )}
+
                     <td className="py-2.5 px-3.5 font-sans">
                       <div className="flex items-center gap-2">
                         <span 
                           className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10" 
                           style={{ backgroundColor: item.color }} 
                         />
-                        <span className="font-semibold text-slate-900 truncate max-w-[180px]">
-                          {item.name}
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-mono bg-slate-100 px-1 py-0.5 rounded border border-slate-200">
-                          {item.sku}
-                        </span>
+                        <div className="truncate max-w-[180px]">
+                          <span className="font-semibold text-slate-900 block truncate">{item.name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">{item.sku}</span>
+                        </div>
                         {item.fragile && (
-                          <span className="text-red-600" title={isJa ? '割れ物' : 'Fragile'}>
-                            <ShieldAlert className="w-3.5 h-3.5 inline" />
+                          <span title={isJa ? '割れ物・天地無用' : 'Fragile'} className="text-red-500">
+                            <ShieldAlert className="w-3.5 h-3.5" />
                           </span>
                         )}
                       </div>
                     </td>
 
-                    {/* Position Coordinates */}
-                    <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-700">
-                      X: <strong className="text-amber-600">{coords.x}</strong>, Y: <strong className="text-blue-600">{coords.y}</strong>, Z: <strong className="text-emerald-600">{coords.z}</strong>
+                    <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-600">
+                      X: {coords.x}, Y: {coords.y}, Z: {coords.z}
                     </td>
 
-                    {/* Dimensions */}
-                    <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-700">
+                    <td className="py-2.5 px-3.5 whitespace-nowrap text-slate-600">
                       {formatDimensions(item.length, item.width, item.height, unitSystem, true)}
                     </td>
 
-                    {/* Weight */}
                     <td className="py-2.5 px-3.5 whitespace-nowrap">
-                      <span className="text-emerald-600 font-bold">{formatWeightCompact(item.weight, unitSystem)}</span>
-                      <span className="text-slate-400 text-[10px] ml-1.5 font-sans">
-                        ({isJa ? '累計' : 'Total'}: {formatWeightCompact(cumWeight, unitSystem)})
+                      <span className="text-emerald-600 font-bold">
+                        {formatWeightCompact(item.weight, unitSystem)}
+                      </span>
+                      <span className="text-slate-400 text-[10px] ml-1.5">
+                        (累計: {formatWeightCompact(cumWeight, unitSystem)})
                       </span>
                     </td>
 
-                    {/* Layer */}
-                    <td className="py-2.5 px-3.5 whitespace-nowrap font-sans">
-                      <span className="text-[11px] bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md font-medium">
-                        {isJa ? `第 ${item.layer} 段` : `L${item.layer}`}
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-sans font-medium">
+                        L{item.layer}
                       </span>
                     </td>
 
-                    {/* 3D Inspect Action */}
                     <td className="py-2.5 px-3.5 whitespace-nowrap text-right font-sans">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           onSelectItem(isSelected ? null : item);
                         }}
-                        className={`p-1.5 rounded-lg text-xs transition-colors ${
-                          isSelected ? 'text-blue-600 bg-blue-100 font-bold' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
+                        className={`p-1 rounded transition-colors ${
+                          isSelected ? 'bg-amber-200 text-amber-900' : 'hover:bg-slate-100 text-slate-500'
                         }`}
-                        title={isJa ? '3Dビューでハイライト' : 'Highlight in 3D'}
                       >
                         <Eye className="w-3.5 h-3.5" />
                       </button>

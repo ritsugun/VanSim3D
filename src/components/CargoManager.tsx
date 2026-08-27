@@ -3,7 +3,8 @@ import { CargoItem, Container, UnitSystem, Language } from '../types';
 import { SAMPLE_CARGO_PRESETS, CargoPreset, SAMPLE_CSV_TEMPLATE } from '../data/presets';
 import { 
   Plus, Trash2, Copy, Upload, Download, Sparkles, 
-  ShieldAlert, Check, FileSpreadsheet, FileDown 
+  ShieldAlert, Check, FileSpreadsheet, FileDown,
+  Edit2, ChevronDown, ChevronUp, CheckCircle2, RotateCw, Sliders
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
 
@@ -44,6 +45,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   onSelectContainer
 }) => {
   const [isAddingNew, setIsAddingNew] = useState<boolean>(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [importNotification, setImportNotification] = useState<string | null>(null);
 
@@ -562,113 +564,235 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       )}
 
       {/* Cargo List Items Table */}
-      <div className="flex-1 overflow-y-auto pr-1 space-y-2 max-h-[380px] custom-scrollbar">
+      <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 max-h-[420px] custom-scrollbar">
         {cargoList.length === 0 ? (
           <div className="text-center py-10 text-slate-400 text-xs">
             <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 text-slate-300" />
             <p>{isJa ? '貨物が登録されていません。「CSV取込」または「サンプル混載プリセット」を選択してください。' : 'No cargo items yet. Click "Import" or load a sample preset.'}</p>
           </div>
         ) : (
-          cargoList.map((cargo) => (
-            <div
-              key={cargo.id}
-              className="bg-white border border-slate-200 hover:border-slate-300 rounded-xl p-3 transition-all flex items-center justify-between gap-3 text-xs shadow-xs"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div
-                  className="w-4 h-4 rounded-full shrink-0 border border-black/15 shadow-2xs"
-                  style={{ backgroundColor: cargo.color }}
-                  title={cargo.color}
-                />
-                <div className="truncate">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900 truncate">{cargo.name}</span>
-                    <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                      {cargo.color}
-                    </span>
+          cargoList.map((cargo) => {
+            const isEditing = editingItemId === cargo.id;
+
+            return (
+              <div
+                key={cargo.id}
+                className={`bg-white border rounded-xl p-3 transition-all text-xs shadow-xs ${
+                  isEditing ? 'border-blue-500 ring-1 ring-blue-500/20 bg-blue-50/20' : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div
+                      className="w-4 h-4 rounded-full shrink-0 border border-black/15 shadow-2xs cursor-pointer"
+                      style={{ backgroundColor: cargo.color }}
+                      title={cargo.color}
+                      onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
+                    />
+                    <div className="truncate flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900 truncate">{cargo.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 font-mono text-[10px] flex items-center gap-1 transition-colors"
+                        >
+                          <Edit2 className="w-3 h-3 text-slate-400" />
+                          <span>{isEditing ? (isJa ? '完了' : 'Done') : (isJa ? '寸法変更' : 'Edit Size')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateItem(cargo.id, { 
+                            allowTilt: !(cargo.allowTilt && cargo.allowRoll),
+                            allowRoll: !(cargo.allowTilt && cargo.allowRoll)
+                          })}
+                          title={isJa ? 'クリックで3D回転許可を切替' : 'Click to toggle 3D rotation'}
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-semibold cursor-pointer transition-colors border ${
+                            cargo.allowTilt && cargo.allowRoll 
+                              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          3D回転:{cargo.allowTilt && cargo.allowRoll ? '1' : '0'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateItem(cargo.id, { 
+                            fragile: !cargo.fragile,
+                            maxStackWeight: !cargo.fragile ? 0 : 150
+                          })}
+                          title={isJa ? 'クリックで割れ物(上積み禁止)を切替' : 'Click to toggle fragile'}
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors flex items-center gap-0.5 border ${
+                            cargo.fragile
+                              ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                              : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                          }`}
+                        >
+                          <ShieldAlert className="w-3 h-3" />
+                          {cargo.fragile ? (isJa ? '割れ物:1' : 'Fragile:1') : (isJa ? '割れ物:0' : 'Fragile:0')}
+                        </button>
+                      </div>
+
+                      {!isEditing && (
+                        <div className="text-[11px] text-slate-500 flex items-center gap-2.5 mt-1 flex-wrap">
+                          <span className="font-mono text-slate-700 font-semibold bg-slate-100 px-1.5 py-0.5 rounded">
+                            幅:{cargo.width} × 高:{cargo.height} × 奥:{cargo.length} mm
+                          </span>
+                          <span className="text-slate-300">|</span>
+                          <span className="text-emerald-600 font-bold font-mono">
+                            {formatWeightCompact(cargo.weight, unitSystem)}/個
+                          </span>
+                          <span className="text-slate-300">|</span>
+                          <span className="text-slate-600 font-mono text-[10px]">
+                            {isJa ? '小計' : 'Total'}: {formatVolume((cargo.length * cargo.width * cargo.height * cargo.quantity) / 1_000_000_000, unitSystem)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Quantity Changer & Action Buttons */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                      <span className="text-[10px] text-slate-500 mr-1 font-medium">{isJa ? '個数:' : 'Qty:'}</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={cargo.quantity}
+                        onChange={(e) => {
+                          const val = Math.max(1, Number(e.target.value) || 1);
+                          handleUpdateItem(cargo.id, { 
+                            quantity: val,
+                            maxQuantity: val
+                          });
+                        }}
+                        className="w-12 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
+                      />
+                    </div>
+
                     <button
-                      type="button"
-                      onClick={() => handleUpdateItem(cargo.id, { 
-                        allowTilt: !(cargo.allowTilt && cargo.allowRoll),
-                        allowRoll: !(cargo.allowTilt && cargo.allowRoll)
-                      })}
-                      title={isJa ? 'クリックで3D回転許可を切替' : 'Click to toggle 3D rotation'}
-                      className={`text-[9px] px-1.5 py-0.5 rounded font-semibold cursor-pointer transition-colors border ${
-                        cargo.allowTilt && cargo.allowRoll 
-                          ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
-                          : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                      onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
+                      title={isJa ? '寸法・重量を編集' : 'Edit dimensions'}
+                      className={`p-1.5 rounded-lg transition-colors ${
+                        isEditing ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
                       }`}
                     >
-                      3D回転:{cargo.allowTilt && cargo.allowRoll ? '1' : '0'}
+                      <Edit2 className="w-3.5 h-3.5" />
                     </button>
 
                     <button
-                      type="button"
-                      onClick={() => handleUpdateItem(cargo.id, { 
-                        fragile: !cargo.fragile,
-                        maxStackWeight: !cargo.fragile ? 0 : 150
-                      })}
-                      title={isJa ? 'クリックで割れ物(上積み禁止)を切替' : 'Click to toggle fragile'}
-                      className={`text-[9px] px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors flex items-center gap-0.5 border ${
-                        cargo.fragile
-                          ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
-                          : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
-                      }`}
+                      onClick={() => handleDuplicateItem(cargo)}
+                      title={isJa ? '複製' : 'Duplicate'}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-colors"
                     >
-                      <ShieldAlert className="w-3 h-3" />
-                      {cargo.fragile ? (isJa ? '割れ物:1' : 'Fragile:1') : (isJa ? '割れ物:0' : 'Fragile:0')}
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => handleDeleteItem(cargo.id)}
+                      title={isJa ? '削除' : 'Delete'}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
-                  <div className="text-[11px] text-slate-500 flex items-center gap-2.5 mt-1 flex-wrap">
-                    <span className="font-mono text-slate-700 font-medium">
-                      幅:{cargo.width} × 高:{cargo.height} × 奥:{cargo.length} mm
-                    </span>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-emerald-600 font-bold font-mono">
-                      {formatWeightCompact(cargo.weight, unitSystem)}/個
-                    </span>
-                    <span className="text-slate-300">|</span>
-                    <span className="text-slate-600 font-mono text-[10px]">
-                      {isJa ? '小計' : 'Total'}: {formatVolume((cargo.length * cargo.width * cargo.height * cargo.quantity) / 1_000_000_000, unitSystem)}
-                    </span>
+                </div>
+
+                {/* Inline Dimension Editor Panel when expanded */}
+                {isEditing && (
+                  <div className="mt-3 pt-3 border-t border-blue-100 bg-white p-3 rounded-lg border space-y-2.5 animate-fadeIn">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-blue-900 flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-blue-600" />
+                        {isJa ? '寸法・重量のリアルタイム変更' : 'Edit Dimensions & Weight (Real-time)'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditingItemId(null)}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 font-bold px-2 py-0.5 bg-blue-50 hover:bg-blue-100 rounded"
+                      >
+                        ✓ {isJa ? '確定' : 'Done'}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
+                          {isJa ? '幅 W (mm)' : 'Width W (mm)'}
+                        </label>
+                        <input
+                          type="number"
+                          min="10"
+                          step="10"
+                          value={cargo.width}
+                          onChange={(e) => handleUpdateItem(cargo.id, { width: Math.max(10, Number(e.target.value) || 10) })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-mono font-bold text-slate-800 focus:bg-white focus:border-blue-500 outline-none text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
+                          {isJa ? '高さ H (mm)' : 'Height H (mm)'}
+                        </label>
+                        <input
+                          type="number"
+                          min="10"
+                          step="10"
+                          value={cargo.height}
+                          onChange={(e) => handleUpdateItem(cargo.id, { height: Math.max(10, Number(e.target.value) || 10) })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-mono font-bold text-slate-800 focus:bg-white focus:border-blue-500 outline-none text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
+                          {isJa ? '奥行 D / 長 (mm)' : 'Depth / Length (mm)'}
+                        </label>
+                        <input
+                          type="number"
+                          min="10"
+                          step="10"
+                          value={cargo.length}
+                          onChange={(e) => handleUpdateItem(cargo.id, { length: Math.max(10, Number(e.target.value) || 10) })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-mono font-bold text-slate-800 focus:bg-white focus:border-blue-500 outline-none text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
+                          {isJa ? '重量 (kg)' : 'Weight (kg)'}
+                        </label>
+                        <input
+                          type="number"
+                          min="0.1"
+                          step="0.5"
+                          value={cargo.weight}
+                          onChange={(e) => handleUpdateItem(cargo.id, { weight: Math.max(0.1, Number(e.target.value) || 0.1) })}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-mono font-bold text-emerald-600 focus:bg-white focus:border-blue-500 outline-none text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-slate-400 font-medium">{isJa ? 'カラー:' : 'Color:'}</span>
+                        {COLOR_PALETTE.slice(0, 8).map(col => (
+                          <button
+                            key={col}
+                            type="button"
+                            onClick={() => handleUpdateItem(cargo.id, { color: col })}
+                            className={`w-3.5 h-3.5 rounded-full border transition-all ${cargo.color === col ? 'border-slate-900 scale-125' : 'border-transparent opacity-70'}`}
+                            style={{ backgroundColor: col }}
+                          />
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        {isJa ? '単体容積' : 'Unit Vol'}: {((cargo.length * cargo.width * cargo.height) / 1_000_000_000).toFixed(3)} m³
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
-
-              {/* Quantity Changer & Action Buttons */}
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
-                  <span className="text-[10px] text-slate-500 mr-1 font-medium">{isJa ? '個数:' : 'Qty:'}</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={cargo.quantity}
-                    onChange={(e) => handleUpdateItem(cargo.id, { 
-                      quantity: Math.max(1, Number(e.target.value)),
-                      maxQuantity: Math.max(1, Number(e.target.value))
-                    })}
-                    className="w-12 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
-                  />
-                </div>
-
-                <button
-                  onClick={() => handleDuplicateItem(cargo)}
-                  title={isJa ? '複製' : 'Duplicate'}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-colors"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-
-                <button
-                  onClick={() => handleDeleteItem(cargo.id)}
-                  title={isJa ? '削除' : 'Delete'}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

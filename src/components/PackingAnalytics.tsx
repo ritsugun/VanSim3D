@@ -1,8 +1,8 @@
 import React from 'react';
-import { PackingMetrics, Container, Language, UnitSystem, UnplacedItem } from '../types';
+import { PackingMetrics, Container, Language, UnitSystem, UnplacedItem, ContainerLoad, OverallPackingMetrics } from '../types';
 import { 
   Gauge, Scale, Crosshair, AlertTriangle, CheckCircle2, 
-  Truck, ArrowRight, DollarSign, PackageCheck, Layers 
+  Truck, DollarSign, PackageCheck, Layers, Grid3X3
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatLength } from '../utils/units';
 
@@ -12,6 +12,10 @@ interface PackingAnalyticsProps {
   unplacedItems: UnplacedItem[];
   language: Language;
   unitSystem: UnitSystem;
+  containers?: ContainerLoad[];
+  overallMetrics?: OverallPackingMetrics;
+  activeContainerIndex?: number | 'all';
+  onSelectContainerIndex?: (index: number | 'all') => void;
 }
 
 export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
@@ -19,7 +23,11 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
   container,
   unplacedItems,
   language,
-  unitSystem
+  unitSystem,
+  containers,
+  overallMetrics,
+  activeContainerIndex = 0,
+  onSelectContainerIndex
 }) => {
   const isJa = language === 'ja';
 
@@ -33,8 +41,90 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
   const crosshairLeft = 50 + metrics.centerOfGravity.offsetXPercent;
   const crosshairTop = 50 + metrics.centerOfGravity.offsetYPercent;
 
+  const hasMultipleContainers = containers && containers.length > 1;
+
   return (
     <div id="packing-analytics-root" className="space-y-4">
+      {/* Fleet Multi-Container Summary Card if multiple containers exist */}
+      {hasMultipleContainers && overallMetrics && (
+        <div className="bg-linear-to-r from-blue-50/80 to-purple-50/80 border border-blue-200 rounded-xl p-4 shadow-xs text-slate-800">
+          <div className="flex items-center justify-between gap-3 mb-3 pb-2.5 border-b border-blue-200/60 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+                <Truck className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  {isJa ? 'マルチコンテナ輸送編成サマリー' : 'Fleet Multi-Container Summary'}
+                  <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded font-mono font-bold">
+                    {overallMetrics.totalContainersCount} {isJa ? '台 編成' : 'Units'}
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {isJa 
+                    ? `全 ${overallMetrics.totalItemsCount} 個の荷物を ${overallMetrics.totalContainersCount} 台のコンテナに最適分散配置` 
+                    : `Distributed all ${overallMetrics.totalItemsCount} cargo items across ${overallMetrics.totalContainersCount} containers`}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs">
+              <div className="bg-white/80 backdrop-blur-xs px-3 py-1.5 rounded-lg border border-blue-200/80">
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">{isJa ? '全台平均容積積載率' : 'Fleet Avg Volume'}</span>
+                <span className="font-mono font-bold text-blue-700 text-sm">{overallMetrics.overallVolumeUtilization.toFixed(1)}%</span>
+              </div>
+              <div className="bg-white/80 backdrop-blur-xs px-3 py-1.5 rounded-lg border border-blue-200/80">
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">{isJa ? '全台総輸送コスト' : 'Total Fleet Cost'}</span>
+                <span className="font-mono font-bold text-purple-700 text-sm">${overallMetrics.totalCostEstimate.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Container Breakdown Chips */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {containers.map((cLoad, idx) => {
+              const isSelected = activeContainerIndex === idx;
+              return (
+                <div
+                  key={cLoad.containerIndex}
+                  onClick={() => onSelectContainerIndex && onSelectContainerIndex(idx)}
+                  className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
+                    isSelected
+                      ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                      : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs font-mono ${
+                      isSelected ? 'bg-white text-blue-600' : 'bg-blue-50 text-blue-700'
+                    }`}>
+                      #{idx + 1}
+                    </span>
+                    <div>
+                      <span className="font-bold text-xs block">
+                        {isJa ? `コンテナ #${idx + 1}` : `Container #${idx + 1}`}
+                      </span>
+                      <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                        {cLoad.packedItems.length} {isJa ? '個積載' : 'boxes'} • {formatWeight(cLoad.metrics.packedWeightKg, unitSystem)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className={`font-mono font-bold text-xs block ${isSelected ? 'text-white' : 'text-blue-600'}`}>
+                      {cLoad.metrics.volumeUtilization.toFixed(1)}%
+                    </span>
+                    <span className={`text-[9px] uppercase ${isSelected ? 'text-blue-200' : 'text-slate-400'}`}>
+                      {isJa ? '容積率' : 'Vol'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Unplaced Items Warning Alert if any */}
       {unplacedItems.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-900 text-xs shadow-xs">
@@ -42,8 +132,8 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
             <span>
               {isJa 
-                ? `積載不可の貨物が ${metrics.unplacedCount} 個あります (コンテナ追加が必要です)` 
-                : `${metrics.unplacedCount} items could not be packed into this container`}
+                ? `積載上限により未積載の貨物が ${metrics.unplacedCount} 個あります` 
+                : `${metrics.unplacedCount} items could not be packed into available containers`}
             </span>
           </div>
           <div className="space-y-1 pl-6 text-[11px] text-amber-800/90">
@@ -55,14 +145,6 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                 </span>
               </div>
             ))}
-          </div>
-          <div className="mt-2.5 pl-6 text-[11px] text-amber-900 font-semibold flex items-center gap-1.5">
-            <Truck className="w-3.5 h-3.5 text-amber-700" />
-            <span>
-              {isJa 
-                ? `推奨輸送構成: ${container.name} × ${metrics.containersNeeded} 台` 
-                : `Suggested Fleet: ${container.name} × ${metrics.containersNeeded} units`}
-            </span>
           </div>
         </div>
       )}

@@ -108,11 +108,36 @@ export interface PackingMetrics {
   containersNeeded: number;
 }
 
+export interface ContainerLoad {
+  containerIndex: number;
+  container: Container;
+  packedItems: PackedItem[];
+  metrics: PackingMetrics;
+}
+
+export interface OverallPackingMetrics {
+  totalContainers: number;
+  totalCapacityVolumeCbm: number;
+  totalPackedVolumeCbm: number;
+  totalCapacityWeightKg: number;
+  totalPackedWeightKg: number;
+  overallVolumeUtilization: number;
+  overallWeightUtilization: number;
+  totalItemCount: number;
+  totalPackedCount: number;
+  totalUnplacedCount: number;
+  totalCostEstimate?: number;
+  totalContainersCount?: number;
+  totalItemsCount?: number;
+}
+
 export interface PackingResult {
   container: Container;
+  containers: ContainerLoad[];
   packedItems: PackedItem[];
   unplacedItems: UnplacedItem[];
   metrics: PackingMetrics;
+  overallMetrics?: OverallPackingMetrics;
 }
 
 export interface AiConsultantResponse {

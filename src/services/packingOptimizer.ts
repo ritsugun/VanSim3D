@@ -1,4 +1,4 @@
-import { Container, CargoItem, PackedItem, UnplacedItem, PackingResult, AlgorithmType } from '../types';
+import { Container, CargoItem, PackedItem, UnplacedItem, PackingResult, AlgorithmType, ContainerLoad, OverallPackingMetrics } from '../types';
 
 interface Point3D {
   x: number;
@@ -11,6 +11,13 @@ interface BoxOrientation {
   width: number;
   height: number;
   rotationIndex: number;
+}
+
+interface UnpackedInstance {
+  instanceId: string;
+  item: CargoItem;
+  volume: number;
+  baseArea: number;
 }
 
 /**
@@ -126,103 +133,79 @@ function checkSupportAndStacking(
     }
   }
 
-  // Require at least 60% base area support to ensure physical stability
-  return (supportedArea / candBaseArea) >= 0.60;
+  // Require at least 50% base area support to ensure physical stability
+  return (supportedArea / candBaseArea) >= 0.50;
 }
 
 /**
- * Core 3D Packing Optimization Engine with multiple heuristics
+ * Packs instances into a single container
  */
-export function run3DPackingOptimizer(
+function packSingleContainer(
   container: Container,
-  cargoList: CargoItem[],
-  algorithm: AlgorithmType = 'extreme_points_bfd'
-): PackingResult {
-  const startTime = performance.now();
+  containerIndex: number,
+  availableInstances: UnpackedInstance[],
+  algorithm: AlgorithmType,
+  startSequenceNumber: number
+): {
+  containerLoad: ContainerLoad;
+  remainingInstances: UnpackedInstance[];
+  placedInstancesCount: number;
+} {
+  // Sanitize container dimensions
+  const safeLength = Math.max(100, Number(container.length) || 6000);
+  const safeWidth = Math.max(100, Number(container.width) || 2400);
+  const safeHeight = Math.max(100, Number(container.height) || 2400);
+  const safeMaxWeight = Math.max(10, Number(container.maxWeight) || 20000);
 
-  // Expand all items based on quantity
-  interface UnpackedInstance {
-    instanceId: string;
-    item: CargoItem;
-    volume: number;
-    baseArea: number;
-  }
-
-  const instances: UnpackedInstance[] = [];
-  cargoList.forEach((cargo) => {
-    const vol = cargo.length * cargo.width * cargo.height;
-    const base = cargo.length * cargo.width;
-    for (let q = 0; q < cargo.quantity; q++) {
-      instances.push({
-        instanceId: `${cargo.id}_${q + 1}`,
-        item: cargo,
-        volume: vol,
-        baseArea: base
-      });
-    }
-  });
-
-  // Sorting heuristics based on algorithm
-  if (algorithm === 'weight_balanced') {
-    // Heaviest first, then priority, then largest volume
-    instances.sort((a, b) => {
-      if ((a.item.priority || 3) !== (b.item.priority || 3)) {
-        return (a.item.priority || 3) - (b.item.priority || 3);
-      }
-      if (b.item.weight !== a.item.weight) {
-        return b.item.weight - a.item.weight;
-      }
-      return b.volume - a.volume;
-    });
-  } else if (algorithm === 'wall_building') {
-    // Longest along X first, then height
-    instances.sort((a, b) => {
-      if ((a.item.priority || 3) !== (b.item.priority || 3)) {
-        return (a.item.priority || 3) - (b.item.priority || 3);
-      }
-      if (b.item.length !== a.item.length) {
-        return b.item.length - a.item.length;
-      }
-      return b.volume - a.volume;
-    });
-  } else if (algorithm === 'layer_stacking') {
-    // Non-increasing height, then non-increasing base area
-    instances.sort((a, b) => {
-      if (b.item.height !== a.item.height) {
-        return b.item.height - a.item.height;
-      }
-      return b.baseArea - a.baseArea;
-    });
-  } else {
-    // Extreme Points Best-Fit Decreasing (Default)
-    // Priority first -> Volume descending -> Weight descending
-    instances.sort((a, b) => {
-      if ((a.item.priority || 3) !== (b.item.priority || 3)) {
-        return (a.item.priority || 3) - (b.item.priority || 3);
-      }
-      if (b.volume !== a.volume) {
-        return b.volume - a.volume;
-      }
-      return b.item.weight - a.item.weight;
-    });
-  }
+  const safeContainer: Container = {
+    ...container,
+    length: safeLength,
+    width: safeWidth,
+    height: safeHeight,
+    maxWeight: safeMaxWeight
+  };
 
   const packedItems: PackedItem[] = [];
-  const unplacedMap = new Map<string, { cargo: CargoItem; reason: 'exceeds_weight' | 'no_spatial_fit'; count: number }>();
+  const remainingInstances: UnpackedInstance[] = [];
   let currentTotalWeight = 0;
 
   // Extreme Points Set (initialized at origin [0, 0, 0])
-  const extremePoints: Point3D[] = [{ x: 0, y: 0, z: 0 }];
+  let extremePoints: Point3D[] = [{ x: 0, y: 0, z: 0 }];
+
+  const sortPoints = (pts: Point3D[]) => {
+    pts.sort((a, b) => {
+      if (algorithm === 'wall_building') {
+        if (a.x !== b.x) return a.x - b.x;
+        if (a.z !== b.z) return a.z - b.z;
+        return a.y - b.y;
+      } else if (algorithm === 'weight_balanced') {
+        const aDistY = Math.abs(a.y - safeContainer.width / 2);
+        const bDistY = Math.abs(b.y - safeContainer.width / 2);
+        if (a.z !== b.z) return a.z - b.z;
+        if (a.x !== b.x) return a.x - b.x;
+        return aDistY - bDistY;
+      } else if (algorithm === 'layer_stacking') {
+        if (a.z !== b.z) return a.z - b.z;
+        if (a.x !== b.x) return a.x - b.x;
+        return a.y - b.y;
+      } else {
+        // Extreme Points Best Fit: prioritize bottom (z), then back (x), then left (y)
+        if (a.z !== b.z) return a.z - b.z;
+        if (a.x !== b.x) return a.x - b.x;
+        return a.y - b.y;
+      }
+    });
+  };
 
   const addExtremePoint = (x: number, y: number, z: number) => {
     // Validate bounds
     if (x < 0 || y < 0 || z < 0) return;
-    if (x >= container.length || y >= container.width || z >= container.height) return;
+    if (x >= safeContainer.length || y >= safeContainer.width || z >= safeContainer.height) return;
 
-    // Check if point already exists or is enveloped inside an existing box
+    // Check if point already exists
     for (let i = 0; i < extremePoints.length; i++) {
       const ep = extremePoints[i];
-      if (ep.x === x && ep.y === y && ep.z === z) return;
+      if (Math.abs(ep.x - x) < 2 && Math.abs(ep.y - y) < 2 && Math.abs(ep.z - z) < 2) return;
     }
 
     // Ensure point is not strictly inside an existing placed box
@@ -240,60 +223,55 @@ export function run3DPackingOptimizer(
     extremePoints.push({ x, y, z });
   };
 
-  // Process all cargo instances
-  for (let i = 0; i < instances.length; i++) {
-    const inst = instances[i];
+  // Iterate through available instances
+  for (let i = 0; i < availableInstances.length; i++) {
+    const inst = availableInstances[i];
     const cargo = inst.item;
 
+    // Validate cargo dimensions
+    const cL = Math.max(10, Number(cargo.length) || 100);
+    const cW = Math.max(10, Number(cargo.width) || 100);
+    const cH = Math.max(10, Number(cargo.height) || 100);
+    const cWt = Math.max(0.1, Number(cargo.weight) || 1);
+
+    const safeCargo = { ...cargo, length: cL, width: cW, height: cH, weight: cWt };
+
     // Check weight limit
-    if (currentTotalWeight + cargo.weight > container.maxWeight) {
-      const existing = unplacedMap.get(cargo.id) || { cargo, reason: 'exceeds_weight', count: 0 };
-      existing.count++;
-      unplacedMap.set(cargo.id, existing);
+    if (currentTotalWeight + safeCargo.weight > safeContainer.maxWeight) {
+      remainingInstances.push(inst);
       continue;
     }
 
-    const orientations = getValidOrientations(cargo);
+    // Quick fit check: if min dimension is larger than container max dimension, skip
+    const minItemDim = Math.min(cL, cW, cH);
+    const maxContDim = Math.max(safeContainer.length, safeContainer.width, safeContainer.height);
+    if (minItemDim > maxContDim) {
+      remainingInstances.push(inst);
+      continue;
+    }
+
+    const orientations = getValidOrientations(safeCargo);
     let bestPlacement: {
       point: Point3D;
       orientation: BoxOrientation;
       score: number;
     } | null = null;
 
-    // Sort extreme points to encourage dense loading
-    // Wall-building biases packing towards back (X=0) and bottom (Z=0)
-    extremePoints.sort((a, b) => {
-      if (algorithm === 'wall_building') {
-        if (a.x !== b.x) return a.x - b.x; // Pack along length in walls
-        if (a.z !== b.z) return a.z - b.z; // Pack floor up
-        return a.y - b.y;
-      } else if (algorithm === 'weight_balanced') {
-        // Bias heavy items to floor (z=0) and container middle-width (y = W/2)
-        const aDistY = Math.abs(a.y - container.width / 2);
-        const bDistY = Math.abs(b.y - container.width / 2);
-        if (a.z !== b.z) return a.z - b.z;
-        if (a.x !== b.x) return a.x - b.x;
-        return aDistY - bDistY;
-      } else {
-        // Standard EP: Ground first (Z=0), Back first (X=0), Left first (Y=0)
-        if (a.x !== b.x) return a.x - b.x;
-        if (a.y !== b.y) return a.y - b.y;
-        return a.z - b.z;
-      }
-    });
+    // Test active extreme points (up to 250 points)
+    const pointsToTest = extremePoints.slice(0, 250);
 
     // Test extreme points and orientations
-    for (let pIdx = 0; pIdx < extremePoints.length; pIdx++) {
-      const pt = extremePoints[pIdx];
+    for (let pIdx = 0; pIdx < pointsToTest.length; pIdx++) {
+      const pt = pointsToTest[pIdx];
 
       for (let oIdx = 0; oIdx < orientations.length; oIdx++) {
         const ori = orientations[oIdx];
 
         // Container boundary check
         if (
-          pt.x + ori.length > container.length ||
-          pt.y + ori.width > container.width ||
-          pt.z + ori.height > container.height
+          pt.x + ori.length > safeContainer.length ||
+          pt.y + ori.width > safeContainer.width ||
+          pt.z + ori.height > safeContainer.height
         ) {
           continue;
         }
@@ -305,7 +283,7 @@ export function run3DPackingOptimizer(
           length: ori.length,
           width: ori.width,
           height: ori.height,
-          weight: cargo.weight
+          weight: safeCargo.weight
         };
 
         // Collision check
@@ -318,11 +296,9 @@ export function run3DPackingOptimizer(
           continue;
         }
 
-        // Scoring heuristic for Best-Fit
-        // Score minimizes empty void created and distance from back-left-bottom corner
-        const cornerDistScore = (pt.x * 1.5) + (pt.y * 1.0) + (pt.z * 2.0);
-        const heightPenalty = pt.z * 1.2;
-        const score = cornerDistScore + heightPenalty;
+        // Score based on position (favoring low Z, low X, low Y)
+        const cornerDistScore = (pt.z * 10.0) + (pt.x * 1.5) + (pt.y * 1.0);
+        const score = cornerDistScore;
 
         if (!bestPlacement || score < bestPlacement.score) {
           bestPlacement = {
@@ -332,11 +308,6 @@ export function run3DPackingOptimizer(
           };
         }
       }
-
-      // If we found a good floor placement at earliest X, break early for speed
-      if (bestPlacement && bestPlacement.point.z === 0 && bestPlacement.point.x === pt.x) {
-        break;
-      }
     }
 
     if (bestPlacement) {
@@ -344,30 +315,30 @@ export function run3DPackingOptimizer(
       const layerNumber = Math.floor(point.z / (orientation.height || 100)) + 1;
 
       const newPackedItem: PackedItem = {
-        id: `packed_${packedItems.length + 1}`,
-        cargoItemId: cargo.id,
-        sku: cargo.sku,
-        name: cargo.name,
+        id: `packed_c${containerIndex + 1}_${packedItems.length + 1}`,
+        cargoItemId: safeCargo.id,
+        sku: safeCargo.sku,
+        name: safeCargo.name,
         x: point.x,
         y: point.y,
         z: point.z,
         length: orientation.length,
         width: orientation.width,
         height: orientation.height,
-        weight: cargo.weight,
-        color: cargo.color,
-        fragile: !!cargo.fragile,
-        sequenceNumber: packedItems.length + 1,
+        weight: safeCargo.weight,
+        color: safeCargo.color,
+        fragile: !!safeCargo.fragile,
+        sequenceNumber: startSequenceNumber + packedItems.length + 1,
         stepIndex: packedItems.length,
         rotationIndex: orientation.rotationIndex,
-        containerIndex: 0,
+        containerIndex,
         layer: layerNumber
       };
 
       packedItems.push(newPackedItem);
-      currentTotalWeight += cargo.weight;
+      currentTotalWeight += safeCargo.weight;
 
-      // Generate new Extreme Points around the placed item
+      // Add extreme points around newly placed item
       const pX2 = point.x + orientation.length;
       const pY2 = point.y + orientation.width;
       const pZ2 = point.z + orientation.height;
@@ -378,6 +349,18 @@ export function run3DPackingOptimizer(
       addExtremePoint(pX2, pY2, point.z);
       addExtremePoint(pX2, point.y, pZ2);
       addExtremePoint(point.x, pY2, pZ2);
+
+      // Project corner points against surrounding placed boxes
+      for (let k = 0; k < packedItems.length - 1; k++) {
+        const other = packedItems[k];
+        const oX2 = other.x + other.length;
+        const oY2 = other.y + other.width;
+        const oZ2 = other.z + other.height;
+
+        if (oX2 <= safeContainer.length) addExtremePoint(oX2, point.y, point.z);
+        if (oY2 <= safeContainer.width) addExtremePoint(point.x, oY2, point.z);
+        if (oZ2 <= safeContainer.height) addExtremePoint(point.x, point.y, oZ2);
+      }
 
       // Clean up extreme points enveloped by this new box
       for (let epIdx = extremePoints.length - 1; epIdx >= 0; epIdx--) {
@@ -390,26 +373,19 @@ export function run3DPackingOptimizer(
           extremePoints.splice(epIdx, 1);
         }
       }
+
+      // Sort points once after placement
+      sortPoints(extremePoints);
+      if (extremePoints.length > 250) {
+        extremePoints = extremePoints.slice(0, 250);
+      }
     } else {
-      const existing = unplacedMap.get(cargo.id) || { cargo, reason: 'no_spatial_fit', count: 0 };
-      existing.count++;
-      unplacedMap.set(cargo.id, existing);
+      remainingInstances.push(inst);
     }
   }
 
-  // Format unplaced items
-  const unplacedItems: UnplacedItem[] = Array.from(unplacedMap.values()).map(val => ({
-    cargoItemId: val.cargo.id,
-    sku: val.cargo.sku,
-    name: val.cargo.name,
-    reason: val.reason,
-    dimensions: { length: val.cargo.length, width: val.cargo.width, height: val.cargo.height },
-    weight: val.cargo.weight,
-    count: val.count
-  }));
-
-  // Calculate Metrics
-  const containerVolMm3 = container.length * container.width * container.height;
+  // Calculate container metrics
+  const containerVolMm3 = safeContainer.length * safeContainer.width * safeContainer.height;
   const containerVolumeCbm = containerVolMm3 / 1_000_000_000;
 
   let packedVolMm3 = 0;
@@ -422,7 +398,6 @@ export function run3DPackingOptimizer(
     const itemVol = p.length * p.width * p.height;
     packedVolMm3 += itemVol;
 
-    // Item center
     const itemCenterX = p.x + p.length / 2;
     const itemCenterY = p.y + p.width / 2;
     const itemCenterZ = p.z + p.height / 2;
@@ -437,26 +412,18 @@ export function run3DPackingOptimizer(
   const volumeUtilization = (packedVolMm3 / containerVolMm3) * 100;
   const weightUtilization = (currentTotalWeight / container.maxWeight) * 100;
 
-  // Center of Gravity (CoG)
   const cogX = currentTotalWeight > 0 ? cogWeightedX / currentTotalWeight : container.length / 2;
   const cogY = currentTotalWeight > 0 ? cogWeightedY / currentTotalWeight : container.width / 2;
   const cogZ = currentTotalWeight > 0 ? cogWeightedZ / currentTotalWeight : container.height / 2;
 
-  // Offsets from geometric center in percentage (-50% to +50%)
   const offsetXPercent = ((cogX - container.length / 2) / container.length) * 100;
   const offsetYPercent = ((cogY - container.width / 2) / container.width) * 100;
   const offsetZPercent = ((cogZ - container.height / 2) / container.height) * 100;
 
-  // Road Axle Weight Distribution Calculation
-  // Front axle is at X=0 (Kingpin / Drive axle), Rear tandem axle is at X=0.85 * Length
   const frontRatio = Math.max(0, Math.min(1, 1 - (cogX / (container.length * 0.85))));
   const rearRatio = 1 - frontRatio;
   const frontAxleKg = currentTotalWeight * frontRatio;
   const rearAxleKg = currentTotalWeight * rearRatio;
-
-  const totalItemCount = cargoList.reduce((acc, c) => acc + c.quantity, 0);
-  const unplacedCount = unplacedItems.reduce((acc, u) => acc + u.count, 0);
-  const endTime = performance.now();
 
   const metrics = {
     containerVolumeCbm,
@@ -466,9 +433,9 @@ export function run3DPackingOptimizer(
     containerMaxWeightKg: container.maxWeight,
     packedWeightKg: currentTotalWeight,
     weightUtilization: Math.min(100, weightUtilization),
-    totalItemCount,
+    totalItemCount: availableInstances.length,
     packedCount: packedItems.length,
-    unplacedCount,
+    unplacedCount: remainingInstances.length,
     centerOfGravity: {
       x: cogX,
       y: cogY,
@@ -483,15 +450,231 @@ export function run3DPackingOptimizer(
       frontAxleKg,
       rearAxleKg
     },
-    calculationTimeMs: Math.round(endTime - startTime),
+    calculationTimeMs: 0,
     algorithm,
-    containersNeeded: unplacedCount > 0 ? Math.ceil(totalItemCount / Math.max(1, packedItems.length)) : 1
+    containersNeeded: 1
   };
 
   return {
-    container,
-    packedItems,
+    containerLoad: {
+      containerIndex,
+      container,
+      packedItems,
+      metrics
+    },
+    remainingInstances,
+    placedInstancesCount: packedItems.length
+  };
+}
+
+/**
+ * Multi-Container 3D Packing Optimization Engine
+ */
+export function run3DPackingOptimizer(
+  container: Container,
+  cargoList: CargoItem[],
+  algorithm: AlgorithmType = 'extreme_points_bfd',
+  containerCount: number | 'auto' = 'auto'
+): PackingResult {
+  const startTime = performance.now();
+
+  const safeLength = Math.max(100, Number(container?.length) || 6000);
+  const safeWidth = Math.max(100, Number(container?.width) || 2400);
+  const safeHeight = Math.max(100, Number(container?.height) || 2400);
+  const safeMaxWeight = Math.max(10, Number(container?.maxWeight) || 20000);
+
+  const safeContainer: Container = {
+    ...container,
+    length: safeLength,
+    width: safeWidth,
+    height: safeHeight,
+    maxWeight: safeMaxWeight
+  };
+
+  // Expand all items based on quantity
+  const instances: UnpackedInstance[] = [];
+  cargoList.forEach((cargo) => {
+    const cL = Math.max(10, Number(cargo.length) || 100);
+    const cW = Math.max(10, Number(cargo.width) || 100);
+    const cH = Math.max(10, Number(cargo.height) || 100);
+    const cWt = Math.max(0.1, Number(cargo.weight) || 1);
+    const cQty = Math.max(0, Math.min(500, Number(cargo.quantity) || 0));
+
+    const sanitizedCargo = {
+      ...cargo,
+      length: cL,
+      width: cW,
+      height: cH,
+      weight: cWt,
+      quantity: cQty
+    };
+
+    const vol = cL * cW * cH;
+    const base = cL * cW;
+    for (let q = 0; q < cQty; q++) {
+      instances.push({
+        instanceId: `${sanitizedCargo.id}_${q + 1}`,
+        item: sanitizedCargo,
+        volume: vol,
+        baseArea: base
+      });
+    }
+  });
+
+  // Sorting heuristics based on algorithm
+  if (algorithm === 'weight_balanced') {
+    instances.sort((a, b) => {
+      if ((a.item.priority || 3) !== (b.item.priority || 3)) {
+        return (a.item.priority || 3) - (b.item.priority || 3);
+      }
+      if (b.item.weight !== a.item.weight) {
+        return b.item.weight - a.item.weight;
+      }
+      return b.volume - a.volume;
+    });
+  } else if (algorithm === 'wall_building') {
+    instances.sort((a, b) => {
+      if ((a.item.priority || 3) !== (b.item.priority || 3)) {
+        return (a.item.priority || 3) - (b.item.priority || 3);
+      }
+      if (b.item.length !== a.item.length) {
+        return b.item.length - a.item.length;
+      }
+      return b.volume - a.volume;
+    });
+  } else if (algorithm === 'layer_stacking') {
+    instances.sort((a, b) => {
+      if (b.item.height !== a.item.height) {
+        return b.item.height - a.item.height;
+      }
+      return b.baseArea - a.baseArea;
+    });
+  } else {
+    // Extreme Points Best-Fit Decreasing (Default)
+    instances.sort((a, b) => {
+      if ((a.item.priority || 3) !== (b.item.priority || 3)) {
+        return (a.item.priority || 3) - (b.item.priority || 3);
+      }
+      if (b.volume !== a.volume) {
+        return b.volume - a.volume;
+      }
+      return b.item.weight - a.item.weight;
+    });
+  }
+
+  const containerLoads: ContainerLoad[] = [];
+  let remainingInstances = [...instances];
+  let currentSeqNumber = 0;
+  const maxAllowedContainers = containerCount === 'auto' ? 25 : Math.max(1, containerCount);
+
+  let cIndex = 0;
+  while (remainingInstances.length > 0 && cIndex < maxAllowedContainers) {
+    const prevCount = remainingInstances.length;
+    const result = packSingleContainer(
+      safeContainer,
+      cIndex,
+      remainingInstances,
+      algorithm,
+      currentSeqNumber
+    );
+
+    // If an entire container was unable to pack even 1 single item, break to prevent infinite loops
+    if (result.placedInstancesCount === 0 || result.remainingInstances.length === prevCount) {
+      break;
+    }
+
+    containerLoads.push(result.containerLoad);
+    currentSeqNumber += result.placedInstancesCount;
+    remainingInstances = result.remainingInstances;
+    cIndex++;
+
+    // If user specified exact container count and we've reached it, stop
+    if (containerCount !== 'auto' && cIndex >= containerCount) {
+      break;
+    }
+  }
+
+  // If no containers were packed (e.g. 0 items), add 1 empty container load
+  if (containerLoads.length === 0) {
+    const emptyResult = packSingleContainer(safeContainer, 0, [], algorithm, 0);
+    containerLoads.push(emptyResult.containerLoad);
+  }
+
+  // Aggregate all packed items across containers
+  const allPackedItems: PackedItem[] = [];
+  containerLoads.forEach(load => {
+    allPackedItems.push(...load.packedItems);
+  });
+
+  // Calculate unplaced items summary
+  const unplacedMap = new Map<string, { cargo: CargoItem; reason: 'exceeds_weight' | 'no_spatial_fit'; count: number }>();
+  remainingInstances.forEach(inst => {
+    const cargo = inst.item;
+    const isWeightExceeded = cargo.weight > safeContainer.maxWeight;
+    const existing = unplacedMap.get(cargo.id) || {
+      cargo,
+      reason: isWeightExceeded ? 'exceeds_weight' : 'no_spatial_fit',
+      count: 0
+    };
+    existing.count++;
+    unplacedMap.set(cargo.id, existing);
+  });
+
+  const unplacedItems: UnplacedItem[] = Array.from(unplacedMap.values()).map(val => ({
+    cargoItemId: val.cargo.id,
+    sku: val.cargo.sku,
+    name: val.cargo.name,
+    reason: val.reason,
+    dimensions: { length: val.cargo.length, width: val.cargo.width, height: val.cargo.height },
+    weight: val.cargo.weight,
+    count: val.count
+  }));
+
+  const endTime = performance.now();
+  const calculationTimeMs = Math.round(endTime - startTime);
+
+  // Overall metrics calculation
+  const totalItemCount = instances.length;
+  const totalPackedCount = allPackedItems.length;
+  const totalUnplacedCount = remainingInstances.length;
+
+  const totalCapacityVolumeCbm = (containerLoads.length * safeContainer.length * safeContainer.width * safeContainer.height) / 1_000_000_000;
+  const totalPackedVolumeCbm = containerLoads.reduce((sum, c) => sum + c.metrics.packedVolumeCbm, 0);
+  const totalCapacityWeightKg = containerLoads.length * safeContainer.maxWeight;
+  const totalPackedWeightKg = containerLoads.reduce((sum, c) => sum + c.metrics.packedWeightKg, 0);
+
+  const overallMetrics: OverallPackingMetrics = {
+    totalContainers: containerLoads.length,
+    totalContainersCount: containerLoads.length,
+    totalCapacityVolumeCbm,
+    totalPackedVolumeCbm,
+    totalCapacityWeightKg,
+    totalPackedWeightKg,
+    overallVolumeUtilization: totalCapacityVolumeCbm > 0 ? (totalPackedVolumeCbm / totalCapacityVolumeCbm) * 100 : 0,
+    overallWeightUtilization: totalCapacityWeightKg > 0 ? (totalPackedWeightKg / totalCapacityWeightKg) * 100 : 0,
+    totalItemCount,
+    totalItemsCount: totalItemCount,
+    totalPackedCount,
+    totalUnplacedCount,
+    totalCostEstimate: containerLoads.length * (safeContainer.costEstimate || 2000)
+  };
+
+  // Primary container metrics (Container #1)
+  const primaryMetrics = {
+    ...containerLoads[0].metrics,
+    calculationTimeMs,
+    totalItemCount,
+    packedCount: totalPackedCount,
+    unplacedCount: totalUnplacedCount,
+    containersNeeded: containerLoads.length + (totalUnplacedCount > 0 ? 1 : 0)
+  };
+
+  return {
+    container: safeContainer,
+    containers: containerLoads,
+    packedItems: allPackedItems,
     unplacedItems,
-    metrics
+    metrics: primaryMetrics,
+    overallMetrics
   };
 }
