@@ -451,7 +451,6 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             <div>
               <label className="text-slate-600 font-medium text-[10px] block mb-1">
                 {isJa ? '重量 (kg)' : 'Weight (kg)'}
-                {unitSystem === 'imperial' && <span className="text-slate-400 font-normal ml-1">(≈ {(newItem.weight * 2.20462).toFixed(1)} lbs)</span>}
               </label>
               <input
                 type="number"

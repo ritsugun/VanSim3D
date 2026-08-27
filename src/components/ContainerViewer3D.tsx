@@ -5,7 +5,7 @@ import { Container, PackedItem, UnitSystem, Language, ContainerLoad } from '../t
 import { 
   Play, Pause, SkipBack, SkipForward, RotateCcw, 
   Layers, Camera, Maximize2, ShieldAlert, 
-  Compass, Crosshair, SlidersHorizontal, Box, Grid3X3
+  Compass, Crosshair, SlidersHorizontal, Box, Grid3X3, X
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 
@@ -75,6 +75,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [showCoG, setShowCoG] = useState<boolean>(true);
   const [showWireframeOnly, setShowWireframeOnly] = useState<boolean>(false);
   const [colorMode, setColorMode] = useState<'cargo' | 'weight' | 'sequence'>('cargo');
+  const [activeCameraView, setActiveCameraView] = useState<'iso' | 'top' | 'side' | 'door'>('iso');
+  const [showSliceControls, setShowSliceControls] = useState<boolean>(false);
   const [zSlicePercent, setZSlicePercent] = useState<number>(100);
   const [xSlicePercent, setXSlicePercent] = useState<number>(100);
   const [hoveredItem, setHoveredItem] = useState<PackedItem | null>(null);
@@ -589,6 +591,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
   // Camera preset views
   const setCameraView = (type: 'iso' | 'top' | 'side' | 'door') => {
+    setActiveCameraView(type);
     if (!cameraRef.current || !controlsRef.current) return;
     const lenM = container.length / 1000;
     const widM = container.width / 1000;
@@ -709,16 +712,24 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="camera-view-iso-btn"
             onClick={() => setCameraView('iso')}
             title={isJa ? '斜視図 (3D Isometric)' : '3D Isometric'}
-            className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors flex items-center gap-1 font-semibold"
+            className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1 font-semibold ${
+              activeCameraView === 'iso'
+                ? 'bg-blue-600 text-white shadow-2xs'
+                : 'hover:bg-slate-100 text-slate-700'
+            }`}
           >
-            <Compass className="w-3.5 h-3.5 text-blue-600" />
+            <Compass className={`w-3.5 h-3.5 ${activeCameraView === 'iso' ? 'text-white' : 'text-blue-600'}`} />
             <span>3D</span>
           </button>
           <button
             id="camera-view-top-btn"
             onClick={() => setCameraView('top')}
             title={isJa ? '上面図 (Top Plan)' : 'Top Plan'}
-            className="px-2.5 py-1 rounded-md hover:bg-slate-100 text-slate-600 transition-colors font-medium"
+            className={`px-2.5 py-1 rounded-md transition-colors font-medium ${
+              activeCameraView === 'top'
+                ? 'bg-blue-600 text-white font-bold shadow-2xs'
+                : 'hover:bg-slate-100 text-slate-700'
+            }`}
           >
             {isJa ? '天面' : 'Top'}
           </button>
@@ -726,7 +737,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="camera-view-side-btn"
             onClick={() => setCameraView('side')}
             title={isJa ? '側面図 (Side View)' : 'Side View'}
-            className="px-2.5 py-1 rounded-md hover:bg-slate-100 text-slate-600 transition-colors font-medium"
+            className={`px-2.5 py-1 rounded-md transition-colors font-medium ${
+              activeCameraView === 'side'
+                ? 'bg-blue-600 text-white font-bold shadow-2xs'
+                : 'hover:bg-slate-100 text-slate-700'
+            }`}
           >
             {isJa ? '側面' : 'Side'}
           </button>
@@ -734,11 +749,33 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="camera-view-door-btn"
             onClick={() => setCameraView('door')}
             title={isJa ? '扉側 (Door Entrance)' : 'Door'}
-            className="px-2.5 py-1 rounded-md hover:bg-slate-100 text-amber-600 transition-colors font-medium"
+            className={`px-2.5 py-1 rounded-md transition-colors font-medium ${
+              activeCameraView === 'door'
+                ? 'bg-amber-600 text-white font-bold shadow-2xs'
+                : 'hover:bg-slate-100 text-amber-700'
+            }`}
           >
             {isJa ? '扉側' : 'Door'}
           </button>
           <div className="w-px h-4 bg-slate-200 mx-0.5" />
+          <button
+            id="toggle-slice-controls-btn"
+            onClick={() => setShowSliceControls(!showSliceControls)}
+            title={isJa ? '断面 & 積載シミュレーション設定' : 'Slice & Loading Simulation Controls'}
+            className={`px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 font-medium ${
+              showSliceControls 
+                ? 'bg-blue-600 text-white shadow-2xs' 
+                : (zSlicePercent < 100 || xSlicePercent < 100 || isPlaying)
+                  ? 'bg-amber-50 text-amber-700 border border-amber-300'
+                  : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline text-xs">{isJa ? '操作パネル' : 'Controls'}</span>
+            {(zSlicePercent < 100 || xSlicePercent < 100 || isPlaying) && !showSliceControls && (
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+            )}
+          </button>
           <button
             id="toggle-cog-btn"
             onClick={() => setShowCoG(!showCoG)}
@@ -832,178 +869,220 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         </div>
       )}
 
-      {/* Layer Slicing & X-Ray Sliders (Floating Right) */}
-      <div className="absolute top-16 right-3 pointer-events-auto bg-white/90 backdrop-blur-md p-2.5 rounded-xl border border-slate-200 shadow-md text-xs space-y-3 z-10 w-44 text-slate-700">
-        <div>
-          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-            <span className="flex items-center gap-1 font-medium">
-              <Layers className="w-3 h-3 text-blue-600" />
-              {isJa ? '高さ断面 (Z)' : 'Height Slice (Z)'}
+      {/* Layer Slicing & Sequence Player Controls (Floating Right) */}
+      {showSliceControls && (
+        <div className="absolute top-16 right-3 pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs space-y-3.5 z-20 w-72 text-slate-700 animate-fade-in">
+          {/* Header with Title, Reset & Close Button */}
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
+              {isJa ? '断面 & 積載再生コントロール' : 'Slice & Loading Controls'}
             </span>
-            <span className="font-mono text-slate-800 font-bold">{zSlicePercent}%</span>
-          </div>
-          <input
-            id="z-slice-slider"
-            type="range"
-            min="10"
-            max="100"
-            value={zSlicePercent}
-            onChange={(e) => setZSlicePercent(Number(e.target.value))}
-            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-            <span className="flex items-center gap-1 font-medium">
-              <SlidersHorizontal className="w-3 h-3 text-emerald-600" />
-              {isJa ? '奥行断面 (X)' : 'Depth Slice (X)'}
-            </span>
-            <span className="font-mono text-slate-800 font-bold">{xSlicePercent}%</span>
-          </div>
-          <input
-            id="x-slice-slider"
-            type="range"
-            min="10"
-            max="100"
-            value={xSlicePercent}
-            onChange={(e) => setXSlicePercent(Number(e.target.value))}
-            className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
-          />
-        </div>
-
-        {/* Color Mode Switcher */}
-        <div className="border-t border-slate-200 pt-2">
-          <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1 font-semibold">
-            {isJa ? '配色モード' : 'Color Scheme'}
-          </span>
-          <div className="grid grid-cols-3 gap-1 text-[10px]">
-            <button
-              onClick={() => setColorMode('cargo')}
-              className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                colorMode === 'cargo' ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {isJa ? '種別' : 'Cargo'}
-            </button>
-            <button
-              onClick={() => setColorMode('weight')}
-              className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                colorMode === 'weight' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {isJa ? '重量' : 'Weight'}
-            </button>
-            <button
-              onClick={() => setColorMode('sequence')}
-              className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                colorMode === 'sequence' ? 'bg-purple-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {isJa ? '順序' : 'Seq'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Loading Sequence Player & Progress Controller */}
-      <div className="bg-slate-900 border-t border-slate-800 px-4 py-2.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs z-20 text-white">
-        {/* Play / Step Buttons */}
-        <div className="flex items-center gap-2">
-          <button
-            id="seq-reset-btn"
-            onClick={() => {
-              setIsPlaying(false);
-              setCurrentStep(0);
-            }}
-            title={isJa ? '最初に戻る' : 'Reset to Start'}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-          <button
-            id="seq-prev-btn"
-            onClick={() => {
-              setIsPlaying(false);
-              setCurrentStep(prev => Math.max(0, prev - 1));
-            }}
-            disabled={currentStep === 0}
-            title={isJa ? '前の荷物' : 'Previous Step'}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
-          >
-            <SkipBack className="w-4 h-4" />
-          </button>
-          <button
-            id="seq-play-pause-btn"
-            onClick={() => {
-              if (currentStep >= activeItemsToDisplay.length) {
-                setCurrentStep(0);
-              }
-              setIsPlaying(!isPlaying);
-            }}
-            className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
-          >
-            {isPlaying ? (
-              <>
-                <Pause className="w-4 h-4" />
-                <span>{isJa ? '一時停止' : 'Pause'}</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-current" />
-                <span>{isJa ? '積載シミュレーション再生' : 'Play Load'}</span>
-              </>
-            )}
-          </button>
-          <button
-            id="seq-next-btn"
-            onClick={() => {
-              setIsPlaying(false);
-              setCurrentStep(prev => Math.min(activeItemsToDisplay.length, prev + 1));
-            }}
-            disabled={currentStep >= activeItemsToDisplay.length}
-            title={isJa ? '次の荷物' : 'Next Step'}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
-          >
-            <SkipForward className="w-4 h-4" />
-          </button>
-
-          {/* Speed Selector */}
-          <div className="flex items-center bg-slate-800 rounded-lg p-0.5 text-[11px] font-semibold text-slate-300">
-            {[1, 2, 4].map((speed) => (
+            <div className="flex items-center gap-1">
+              {(zSlicePercent < 100 || xSlicePercent < 100) && (
+                <button
+                  id="reset-slice-btn"
+                  onClick={() => {
+                    setZSlicePercent(100);
+                    setXSlicePercent(100);
+                  }}
+                  title={isJa ? '断面を全表示に戻す (100%)' : 'Reset Slices (100%)'}
+                  className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold px-1 hover:underline"
+                >
+                  {isJa ? '全表示' : 'Reset'}
+                </button>
+              )}
               <button
-                key={speed}
-                onClick={() => setPlaybackSpeed(speed)}
-                className={`px-2 py-0.5 rounded ${playbackSpeed === speed ? 'bg-blue-600 text-white' : 'hover:text-white'}`}
+                id="close-slice-panel-btn"
+                onClick={() => setShowSliceControls(false)}
+                title={isJa ? 'コントロールUIを非表示にする' : 'Hide Controls'}
+                className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100 transition-colors"
               >
-                {speed}x
+                <X className="w-3.5 h-3.5" />
               </button>
-            ))}
+            </div>
+          </div>
+
+          {/* 1. Play Load / Loading Simulation Player */}
+          <div className="bg-slate-900 text-white p-2.5 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold flex items-center gap-1 text-slate-200">
+                <Play className="w-3 h-3 text-blue-400 fill-current" />
+                {isJa ? '積載シミュレーション' : 'Loading Sequence'}
+              </span>
+              <span className="font-mono text-[11px] text-blue-400 font-bold">
+                {currentStep} / {activeItemsToDisplay.length}
+              </span>
+            </div>
+
+            {/* Play, Step, Speed Buttons */}
+            <div className="flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1">
+                <button
+                  id="seq-reset-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    setCurrentStep(0);
+                  }}
+                  title={isJa ? '最初に戻る' : 'Reset to Start'}
+                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  id="seq-prev-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    setCurrentStep(prev => Math.max(0, prev - 1));
+                  }}
+                  disabled={currentStep === 0}
+                  title={isJa ? '前の荷物' : 'Previous Step'}
+                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
+                >
+                  <SkipBack className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  id="seq-play-pause-btn"
+                  onClick={() => {
+                    if (currentStep >= activeItemsToDisplay.length) {
+                      setCurrentStep(0);
+                    }
+                    setIsPlaying(!isPlaying);
+                  }}
+                  className="px-2.5 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs"
+                >
+                  {isPlaying ? (
+                    <>
+                      <Pause className="w-3.5 h-3.5" />
+                      <span>{isJa ? '停止' : 'Pause'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{isJa ? '再生' : 'Play'}</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  id="seq-next-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    setCurrentStep(prev => Math.min(activeItemsToDisplay.length, prev + 1));
+                  }}
+                  disabled={currentStep >= activeItemsToDisplay.length}
+                  title={isJa ? '次の荷物' : 'Next Step'}
+                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
+                >
+                  <SkipForward className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Speed Buttons */}
+              <div className="flex items-center bg-slate-800 rounded p-0.5 text-[10px] font-semibold text-slate-300">
+                {[1, 2, 4].map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => setPlaybackSpeed(speed)}
+                    className={`px-1.5 py-0.5 rounded ${playbackSpeed === speed ? 'bg-blue-600 text-white' : 'hover:text-white'}`}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Step Slider */}
+            <div>
+              <input
+                id="loading-step-slider"
+                type="range"
+                min="0"
+                max={activeItemsToDisplay.length}
+                value={currentStep}
+                onChange={(e) => {
+                  setIsPlaying(false);
+                  setCurrentStep(Number(e.target.value));
+                }}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* 2. Slicing Sliders */}
+          <div className="space-y-2.5">
+            <div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                <span className="flex items-center gap-1 font-medium">
+                  <Layers className="w-3 h-3 text-blue-600" />
+                  {isJa ? '高さ断面 (Z)' : 'Height Slice (Z)'}
+                </span>
+                <span className="font-mono text-slate-800 font-bold">{zSlicePercent}%</span>
+              </div>
+              <input
+                id="z-slice-slider"
+                type="range"
+                min="10"
+                max="100"
+                value={zSlicePercent}
+                onChange={(e) => setZSlicePercent(Number(e.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
+                <span className="flex items-center gap-1 font-medium">
+                  <SlidersHorizontal className="w-3 h-3 text-emerald-600" />
+                  {isJa ? '奥行断面 (X)' : 'Depth Slice (X)'}
+                </span>
+                <span className="font-mono text-slate-800 font-bold">{xSlicePercent}%</span>
+              </div>
+              <input
+                id="x-slice-slider"
+                type="range"
+                min="10"
+                max="100"
+                value={xSlicePercent}
+                onChange={(e) => setXSlicePercent(Number(e.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+              />
+            </div>
+          </div>
+
+          {/* 3. Color Mode Switcher */}
+          <div className="border-t border-slate-200 pt-2">
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1 font-semibold">
+              {isJa ? '配色モード' : 'Color Scheme'}
+            </span>
+            <div className="grid grid-cols-3 gap-1 text-[10px]">
+              <button
+                onClick={() => setColorMode('cargo')}
+                className={`py-1 rounded-md text-center transition-colors font-semibold ${
+                  colorMode === 'cargo' ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {isJa ? '種別' : 'Cargo'}
+              </button>
+              <button
+                onClick={() => setColorMode('weight')}
+                className={`py-1 rounded-md text-center transition-colors font-semibold ${
+                  colorMode === 'weight' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {isJa ? '重量' : 'Weight'}
+              </button>
+              <button
+                onClick={() => setColorMode('sequence')}
+                className={`py-1 rounded-md text-center transition-colors font-semibold ${
+                  colorMode === 'sequence' ? 'bg-purple-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {isJa ? '順序' : 'Seq'}
+              </button>
+            </div>
           </div>
         </div>
-
-        {/* Step Slider & Numeric Progress */}
-        <div className="flex-1 w-full flex items-center gap-3 max-w-xl">
-          <span className="text-slate-400 text-[11px] whitespace-nowrap">
-            {isJa ? '積込手順:' : 'Step:'}
-          </span>
-          <input
-            id="loading-step-slider"
-            type="range"
-            min="0"
-            max={activeItemsToDisplay.length}
-            value={currentStep}
-            onChange={(e) => {
-              setIsPlaying(false);
-              setCurrentStep(Number(e.target.value));
-            }}
-            className="flex-1 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-          />
-          <span className="font-mono text-white font-bold text-xs whitespace-nowrap min-w-[56px] text-right">
-            {currentStep} / {activeItemsToDisplay.length}
-          </span>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

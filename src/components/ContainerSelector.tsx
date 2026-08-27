@@ -340,7 +340,6 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
             <div>
               <label className="text-slate-600 font-medium block mb-1">
                 {isJa ? '最大積載重量 (kg)' : 'Max Payload (kg)'}
-                {unitSystem === 'imperial' && <span className="text-slate-400 font-normal ml-1">(≈ {Math.round(customForm.maxWeight * 2.20462)} lbs)</span>}
               </label>
               <input
                 type="number"

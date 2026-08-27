@@ -295,6 +295,7 @@ export default function App() {
               overallMetrics={packingResult.overallMetrics}
               activeContainerIndex={activeContainerIndex}
               onSelectContainerIndex={setActiveContainerIndex}
+              packedItems={packingResult.packedItems}
             />
 
             <div className="w-full h-[480px]">
@@ -345,7 +346,7 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 py-3.5 px-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 flex-wrap">
           <span className="font-medium text-slate-600">
-            PackMaster • 3D Container & Vehicle Load Planning System
+            Takumi_Web v1.0 • 3D Container & Vehicle Load Planning System
           </span>
           <span className="text-slate-400">
             {isJa ? 'ISO 668 海上コンテナ & 物流トラック積載規格準拠' : 'ISO 668 Ocean Containers & Highway Fleet Compliant'}

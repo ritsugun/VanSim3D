@@ -1,8 +1,9 @@
-import React from 'react';
-import { PackingMetrics, Container, Language, UnitSystem, UnplacedItem, ContainerLoad, OverallPackingMetrics } from '../types';
+import React, { useState, useMemo } from 'react';
+import { PackingMetrics, Container, Language, UnitSystem, UnplacedItem, ContainerLoad, OverallPackingMetrics, PackedItem } from '../types';
 import { 
   Gauge, Scale, Crosshair, AlertTriangle, CheckCircle2, 
-  Truck, DollarSign, PackageCheck, Layers, Grid3X3
+  Truck, DollarSign, PackageCheck, Layers, Grid3X3,
+  Box, ChevronRight, PieChart, ShieldAlert, Check
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatLength } from '../utils/units';
 
@@ -16,6 +17,21 @@ interface PackingAnalyticsProps {
   overallMetrics?: OverallPackingMetrics;
   activeContainerIndex?: number | 'all';
   onSelectContainerIndex?: (index: number | 'all') => void;
+  packedItems?: PackedItem[];
+}
+
+interface CargoBreakdownItem {
+  sku: string;
+  name: string;
+  color: string;
+  length: number;
+  width: number;
+  height: number;
+  unitWeight: number;
+  count: number;
+  subtotalWeight: number;
+  subtotalVolumeCbm: number;
+  fragile: boolean;
 }
 
 export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
@@ -27,9 +43,11 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
   containers,
   overallMetrics,
   activeContainerIndex = 0,
-  onSelectContainerIndex
+  onSelectContainerIndex,
+  packedItems = []
 }) => {
   const isJa = language === 'ja';
+  const [selectedBreakdownTab, setSelectedBreakdownTab] = useState<number | 'all'>('all');
 
   // CoG Offset status
   const isXSafe = Math.abs(metrics.centerOfGravity.offsetXPercent) <= 5;
@@ -37,11 +55,141 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
   const isOverallBalanced = isXSafe && isYSafe;
 
   // Visual position of crosshair on the 2D balance board
-  // Map -50%..+50% offset to 0%..100% position
   const crosshairLeft = 50 + metrics.centerOfGravity.offsetXPercent;
   const crosshairTop = 50 + metrics.centerOfGravity.offsetYPercent;
 
   const hasMultipleContainers = containers && containers.length > 1;
+
+  // Effective containers list
+  const effectiveContainerLoads: ContainerLoad[] = useMemo(() => {
+    if (containers && containers.length > 0) {
+      return containers;
+    }
+    return [{
+      containerIndex: 1,
+      container,
+      packedItems: packedItems,
+      metrics: metrics
+    }];
+  }, [containers, container, packedItems, metrics]);
+
+  // Helper to compute breakdown for an array of packed items
+  const computeBreakdown = (items: PackedItem[]): CargoBreakdownItem[] => {
+    const map = new Map<string, CargoBreakdownItem>();
+    items.forEach(item => {
+      const key = `${item.sku}_${item.length}_${item.width}_${item.height}_${item.weight}`;
+      const existing = map.get(key);
+      const itemVolCbm = (item.length * item.width * item.height) / 1_000_000_000;
+      if (existing) {
+        existing.count += 1;
+        existing.subtotalWeight += item.weight;
+        existing.subtotalVolumeCbm += itemVolCbm;
+      } else {
+        map.set(key, {
+          sku: item.sku,
+          name: item.name,
+          color: item.color,
+          length: item.length,
+          width: item.width,
+          height: item.height,
+          unitWeight: item.weight,
+          count: 1,
+          subtotalWeight: item.weight,
+          subtotalVolumeCbm: itemVolCbm,
+          fragile: item.fragile
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count || b.subtotalWeight - a.subtotalWeight);
+  };
+
+  // Breakdown per container
+  const breakdownByContainer = useMemo(() => {
+    return effectiveContainerLoads.map(cLoad => ({
+      containerIndex: cLoad.containerIndex,
+      container: cLoad.container,
+      metrics: cLoad.metrics,
+      items: computeBreakdown(cLoad.packedItems),
+      totalCount: cLoad.packedItems.length,
+      totalWeightKg: cLoad.metrics.packedWeightKg,
+      totalVolumeCbm: cLoad.metrics.packedVolumeCbm,
+      volumeUtil: cLoad.metrics.volumeUtilization,
+      weightUtil: cLoad.metrics.weightUtilization
+    }));
+  }, [effectiveContainerLoads]);
+
+  // Overall all-packed items breakdown
+  const allPackedBreakdown = useMemo(() => {
+    const allItems = effectiveContainerLoads.flatMap(c => c.packedItems);
+    return computeBreakdown(allItems);
+  }, [effectiveContainerLoads]);
+
+  // Matrix of SKU distribution across containers
+  const crossContainerMatrix = useMemo(() => {
+    const skuMap = new Map<string, {
+      sku: string;
+      name: string;
+      color: string;
+      length: number;
+      width: number;
+      height: number;
+      unitWeight: number;
+      fragile: boolean;
+      countsByContainer: number[];
+      totalPacked: number;
+      unplacedCount: number;
+    }>();
+
+    // Populate from all containers
+    effectiveContainerLoads.forEach((cLoad, cIdx) => {
+      cLoad.packedItems.forEach(item => {
+        const key = item.sku;
+        let entry = skuMap.get(key);
+        if (!entry) {
+          entry = {
+            sku: item.sku,
+            name: item.name,
+            color: item.color,
+            length: item.length,
+            width: item.width,
+            height: item.height,
+            unitWeight: item.weight,
+            fragile: item.fragile,
+            countsByContainer: new Array(effectiveContainerLoads.length).fill(0),
+            totalPacked: 0,
+            unplacedCount: 0
+          };
+          skuMap.set(key, entry);
+        }
+        entry.countsByContainer[cIdx] += 1;
+        entry.totalPacked += 1;
+      });
+    });
+
+    // Add unplaced items
+    unplacedItems.forEach(u => {
+      let entry = skuMap.get(u.sku);
+      if (!entry) {
+        entry = {
+          sku: u.sku,
+          name: u.name,
+          color: '#94a3b8',
+          length: u.dimensions.length,
+          width: u.dimensions.width,
+          height: u.dimensions.height,
+          unitWeight: u.weight,
+          fragile: false,
+          countsByContainer: new Array(effectiveContainerLoads.length).fill(0),
+          totalPacked: 0,
+          unplacedCount: 0
+        };
+        skuMap.set(u.sku, entry);
+      }
+      entry.unplacedCount += u.count;
+    });
+
+    return Array.from(skuMap.values()).sort((a, b) => b.totalPacked - a.totalPacked);
+  }, [effectiveContainerLoads, unplacedItems]);
 
   return (
     <div id="packing-analytics-root" className="space-y-4">
@@ -367,6 +515,360 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               : 'Ensure compliance with highway legal axle weight limits (e.g. 20,000 lbs single / 34,000 lbs tandem).'}
           </p>
         </div>
+      </div>
+
+      {/* Per-Container Cargo Load Breakdown & Tally Section */}
+      <div id="container-cargo-breakdown-section" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-slate-800 space-y-4">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 flex-wrap">
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <Box className="w-4 h-4 text-blue-600" />
+              {isJa ? '各コンテナ別 貨物積載数・内訳明細' : 'Cargo Breakdown & Quantity per Container'}
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {isJa 
+                ? 'コンテナごとにどの貨物（SKU）が何台・何個積載されたかの詳細内訳一覧' 
+                : 'Itemized summary of which cargo items and exact quantities loaded into each container'}
+            </p>
+          </div>
+
+          {/* Container Selector Tabs for Breakdown */}
+          {hasMultipleContainers && (
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setSelectedBreakdownTab('all')}
+                className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                  selectedBreakdownTab === 'all'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Grid3X3 className="w-3.5 h-3.5" />
+                <span>{isJa ? '全コンテナ配分一覧' : 'All Containers Matrix'}</span>
+              </button>
+              {breakdownByContainer.map((b, idx) => (
+                <button
+                  key={b.containerIndex}
+                  type="button"
+                  onClick={() => setSelectedBreakdownTab(idx)}
+                  className={`px-2.5 py-1 rounded-md transition-all font-mono ${
+                    selectedBreakdownTab === idx
+                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  #{idx + 1} ({b.totalCount} {isJa ? '個' : 'pcs'})
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Multi-Container Matrix View */}
+        {hasMultipleContainers && selectedBreakdownTab === 'all' && (
+          <div className="space-y-4">
+            {/* Cross-Container Cargo Allocation Matrix */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200 custom-scrollbar">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '品名 / SKU' : 'Item Name & SKU'}</th>
+                    <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '寸法 (mm)' : 'Dimensions (mm)'}</th>
+                    <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単重 (kg)' : 'Unit Wt (kg)'}</th>
+                    {breakdownByContainer.map((b, idx) => (
+                      <th key={idx} className="py-2.5 px-3.5 text-center bg-blue-50/50 text-blue-800 whitespace-nowrap font-mono">
+                        {isJa ? `コンテナ #${idx + 1}` : `Container #${idx + 1}`}
+                      </th>
+                    ))}
+                    <th className="py-2.5 px-3.5 text-center whitespace-nowrap font-mono bg-emerald-50 text-emerald-800">
+                      {isJa ? '合計積載数' : 'Total Packed'}
+                    </th>
+                    <th className="py-2.5 px-3.5 text-center whitespace-nowrap font-mono bg-slate-100 text-slate-700">
+                      {isJa ? '未積載' : 'Unplaced'}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {crossContainerMatrix.map((row, rIdx) => {
+                    const isAllPacked = row.unplacedCount === 0;
+                    return (
+                      <tr key={rIdx} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-2.5 px-3.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span 
+                              className="w-3 h-3 rounded-sm shrink-0 border border-black/15 shadow-2xs" 
+                              style={{ backgroundColor: row.color }} 
+                            />
+                            <div>
+                              <span className="font-bold text-slate-900 block">{row.name}</span>
+                              <span className="font-mono text-[10px] text-slate-400">{row.sku}</span>
+                            </div>
+                            {row.fragile && (
+                              <span className="bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.2 rounded font-semibold ml-1">
+                                {isJa ? '割れ物' : 'Fragile'}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-600 text-[11px]">
+                          {row.length} × {row.width} × {row.height}
+                        </td>
+                        <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-700 font-semibold">
+                          {row.unitWeight} kg
+                        </td>
+                        {row.countsByContainer.map((cnt, cIdx) => (
+                          <td key={cIdx} className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap">
+                            {cnt > 0 ? (
+                              <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
+                                {cnt} {isJa ? '個' : 'pcs'}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">-</span>
+                            )}
+                          </td>
+                        ))}
+                        <td className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap bg-emerald-50/50">
+                          <span className="font-bold text-emerald-700 text-xs">
+                            {row.totalPacked} {isJa ? '個' : 'pcs'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap bg-slate-50">
+                          {row.unplacedCount > 0 ? (
+                            <span className="font-bold text-red-600 text-xs bg-red-50 px-2 py-0.5 rounded">
+                              {row.unplacedCount} {isJa ? '個' : 'pcs'}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-600 font-semibold text-xs flex items-center justify-center gap-0.5">
+                              <Check className="w-3 h-3" />
+                              {isJa ? '完了' : '0'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Per-Container Cards in Grid */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {breakdownByContainer.map((b, idx) => (
+                <div key={b.containerIndex} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-md bg-blue-600 text-white font-mono font-bold flex items-center justify-center text-xs">
+                        #{idx + 1}
+                      </span>
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-xs">
+                          {b.container.name}
+                        </h4>
+                        <span className="text-[10px] text-slate-500">
+                          {b.items.length} {isJa ? '品目' : 'SKUs'} • {b.totalCount} {isJa ? '個積載' : 'boxes loaded'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="bg-blue-100 text-blue-800 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                        {isJa ? '容積率' : 'Vol'}: {b.volumeUtil.toFixed(1)}%
+                      </span>
+                      <span className="bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                        {formatWeight(b.totalWeightKg, unitSystem)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                    {b.items.map((item, iIdx) => (
+                      <div key={iIdx} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span 
+                            className="w-2.5 h-2.5 rounded-xs shrink-0 border border-black/10" 
+                            style={{ backgroundColor: item.color }} 
+                          />
+                          <div className="truncate">
+                            <span className="font-bold text-slate-900 truncate block text-xs">{item.name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {item.length}×{item.width}×{item.height}mm • {item.unitWeight}kg
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0 pl-2">
+                          <span className="inline-block bg-blue-50 border border-blue-200 text-blue-700 font-mono font-bold text-xs px-2 py-0.5 rounded">
+                            {item.count} {isJa ? '個' : 'pcs'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block font-mono mt-0.5">
+                            {formatWeight(item.subtotalWeight, unitSystem)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Single Container Breakdown Table View (or Specific Tab Selected) */}
+        {(!hasMultipleContainers || selectedBreakdownTab !== 'all') && (
+          <div>
+            {(() => {
+              const currentLoad = typeof selectedBreakdownTab === 'number' 
+                ? breakdownByContainer[selectedBreakdownTab] || breakdownByContainer[0]
+                : breakdownByContainer[0];
+              
+              if (!currentLoad) return null;
+
+              return (
+                <div className="space-y-3">
+                  {/* Container Quick Specs Pill Bar */}
+                  <div className="flex items-center justify-between bg-blue-50/70 border border-blue-200 rounded-xl p-3 text-xs flex-wrap gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-7 h-7 rounded-lg bg-blue-600 text-white font-mono font-bold flex items-center justify-center text-xs">
+                        #{currentLoad.containerIndex}
+                      </span>
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          {currentLoad.container.name}
+                          <span className="text-slate-400 font-normal">
+                            ({currentLoad.container.length} × {currentLoad.container.width} × {currentLoad.container.height} mm)
+                          </span>
+                        </h4>
+                        <span className="text-slate-500 text-[11px]">
+                          {isJa ? '積載総個数' : 'Total Items'}: <strong className="text-slate-800 font-mono font-bold">{currentLoad.totalCount} {isJa ? '個' : 'boxes'}</strong>
+                          <span className="mx-1.5 text-slate-300">|</span>
+                          {isJa ? '品目数' : 'Unique SKUs'}: <strong className="text-slate-800 font-mono font-bold">{currentLoad.items.length} {isJa ? '種' : 'SKUs'}</strong>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 text-xs">
+                      <div className="bg-white px-2.5 py-1 rounded-lg border border-blue-200">
+                        <span className="text-slate-400 text-[10px] block uppercase font-semibold">{isJa ? '積載重量' : 'Packed Weight'}</span>
+                        <span className="font-mono font-bold text-emerald-700">
+                          {formatWeight(currentLoad.totalWeightKg, unitSystem)} / {formatWeight(currentLoad.container.maxWeight, unitSystem)}
+                        </span>
+                      </div>
+                      <div className="bg-white px-2.5 py-1 rounded-lg border border-blue-200">
+                        <span className="text-slate-400 text-[10px] block uppercase font-semibold">{isJa ? '容積充填率' : 'Volume Util'}</span>
+                        <span className="font-mono font-bold text-blue-700">
+                          {currentLoad.volumeUtil.toFixed(1)}% ({formatVolume(currentLoad.totalVolumeCbm, unitSystem, 2)})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Detailed Table */}
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 custom-scrollbar">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-200">
+                        <tr>
+                          <th className="py-2.5 px-3.5 w-12 text-center">No</th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '貨物名 / 管理SKU' : 'Cargo Item & SKU'}</th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体外寸 (L×W×H mm)' : 'Unit Dimensions (mm)'}</th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体重量' : 'Unit Weight'}</th>
+                          <th className="py-2.5 px-3.5 text-center whitespace-nowrap bg-blue-50 text-blue-800 font-bold">
+                            {isJa ? '積載個数 (Qty)' : 'Loaded Qty'}
+                          </th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '小計重量 (kg)' : 'Subtotal Weight (kg)'}</th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '小計容積 (m³)' : 'Subtotal Volume (m³)'}</th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '容積占有率' : 'Volume Share'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {currentLoad.items.map((item, idx) => {
+                          const volSharePercent = currentLoad.totalVolumeCbm > 0 
+                            ? (item.subtotalVolumeCbm / currentLoad.totalVolumeCbm) * 100 
+                            : 0;
+
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-2.5 px-3.5 text-center font-mono text-slate-400 text-xs">
+                                {idx + 1}
+                              </td>
+                              <td className="py-2.5 px-3.5 whitespace-nowrap">
+                                <div className="flex items-center gap-2">
+                                  <span 
+                                    className="w-3.5 h-3.5 rounded-sm shrink-0 border border-black/15 shadow-2xs" 
+                                    style={{ backgroundColor: item.color }} 
+                                  />
+                                  <div>
+                                    <span className="font-bold text-slate-900 block">{item.name}</span>
+                                    <span className="font-mono text-[10px] text-slate-400">{item.sku}</span>
+                                  </div>
+                                  {item.fragile && (
+                                    <span className="bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.2 rounded font-semibold ml-1">
+                                      {isJa ? '割れ物' : 'Fragile'}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-600 text-[11px]">
+                                {item.length} × {item.width} × {item.height}
+                              </td>
+                              <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-700 font-semibold">
+                                {item.unitWeight} kg
+                              </td>
+                              <td className="py-2.5 px-3.5 text-center whitespace-nowrap bg-blue-50/40">
+                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-blue-600 text-white font-mono font-bold text-xs shadow-2xs">
+                                  {item.count} {isJa ? '個' : 'pcs'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-800 font-semibold">
+                                {item.subtotalWeight.toLocaleString()} kg
+                              </td>
+                              <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-800">
+                                {item.subtotalVolumeCbm.toFixed(3)} m³
+                              </td>
+                              <td className="py-2.5 px-3.5 whitespace-nowrap font-mono">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                    <div 
+                                      className="bg-blue-600 h-full rounded-full" 
+                                      style={{ width: `${Math.min(100, volSharePercent)}%` }} 
+                                    />
+                                  </div>
+                                  <span className="text-[11px] font-bold text-slate-700">
+                                    {volSharePercent.toFixed(1)}%
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      {/* Footer Totals */}
+                      <tfoot className="bg-slate-50 font-bold border-t-2 border-slate-200 text-slate-900 text-xs">
+                        <tr>
+                          <td colSpan={4} className="py-2.5 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-500">
+                            {isJa ? 'コンテナ積載合計:' : 'Container Total:'}
+                          </td>
+                          <td className="py-2.5 px-3.5 text-center font-mono text-blue-700 text-sm bg-blue-100/50 font-bold">
+                            {currentLoad.totalCount} {isJa ? '個' : 'pcs'}
+                          </td>
+                          <td className="py-2.5 px-3.5 font-mono text-emerald-700">
+                            {currentLoad.totalWeightKg.toLocaleString()} kg
+                          </td>
+                          <td className="py-2.5 px-3.5 font-mono text-blue-700">
+                            {currentLoad.totalVolumeCbm.toFixed(3)} m³
+                          </td>
+                          <td className="py-2.5 px-3.5 font-mono text-slate-600">
+                            100%
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -10,8 +10,8 @@ interface HeaderProps {
   onChangeAlgorithm: (algo: AlgorithmType) => void;
   language: Language;
   onChangeLanguage: (lang: Language) => void;
-  unitSystem: UnitSystem;
-  onChangeUnitSystem: (unit: UnitSystem) => void;
+  unitSystem?: UnitSystem;
+  onChangeUnitSystem?: (unit: UnitSystem) => void;
   onOpenAiConsultant: () => void;
   onReoptimize: () => void;
   isCalculating: boolean;
@@ -22,8 +22,6 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeAlgorithm,
   language,
   onChangeLanguage,
-  unitSystem,
-  onChangeUnitSystem,
   onOpenAiConsultant,
   onReoptimize,
   isCalculating
@@ -41,7 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base sm:text-lg font-bold leading-tight text-slate-900 tracking-tight">
-                PackMaster <span className="text-blue-600">v2.5</span>
+                Takumi_Web <span className="text-blue-600">v1.0</span>
               </h1>
               <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded">
                 PRO
@@ -77,28 +75,6 @@ export const Header: React.FC<HeaderProps> = ({
                 {isJa ? 'レイヤースタッキング (均一多段積み)' : 'Layer Stacking (Flat Density)'}
               </option>
             </select>
-          </div>
-
-          {/* Unit Toggle */}
-          <div className="flex items-center bg-slate-100 border border-slate-200 rounded-lg p-0.5 text-[11px] font-semibold text-slate-600">
-            <button
-              onClick={() => onChangeUnitSystem('metric')}
-              className={`px-2 py-1 rounded-md transition-colors ${
-                unitSystem === 'metric' ? 'bg-white text-blue-600 font-bold shadow-xs' : 'hover:text-slate-900'
-              }`}
-              title="Metric (mm, kg, m³)"
-            >
-              Metric
-            </button>
-            <button
-              onClick={() => onChangeUnitSystem('imperial')}
-              className={`px-2 py-1 rounded-md transition-colors ${
-                unitSystem === 'imperial' ? 'bg-white text-blue-600 font-bold shadow-xs' : 'hover:text-slate-900'
-              }`}
-              title="Imperial (in, lb, ft³)"
-            >
-              Imperial
-            </button>
           </div>
 
           {/* Language Switcher */}

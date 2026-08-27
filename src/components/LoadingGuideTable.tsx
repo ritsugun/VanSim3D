@@ -88,6 +88,40 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
     return map;
   }, [allPackedItems]);
 
+  // Summary of items and counts per container
+  const containerCargoSummaries = useMemo(() => {
+    const containerLoadsList = hasMultipleContainers 
+      ? containers 
+      : [{ containerIndex: 1, container, packedItems, metrics: {} as any }];
+
+    return containerLoadsList.map(c => {
+      const itemMap = new Map<string, { name: string; sku: string; color: string; count: number; weight: number }>();
+      c.packedItems.forEach(item => {
+        const key = item.sku;
+        const existing = itemMap.get(key);
+        if (existing) {
+          existing.count += 1;
+          existing.weight += item.weight;
+        } else {
+          itemMap.set(key, {
+            name: item.name,
+            sku: item.sku,
+            color: item.color,
+            count: 1,
+            weight: item.weight
+          });
+        }
+      });
+      return {
+        containerIndex: c.containerIndex,
+        containerName: c.container?.name || `Container #${c.containerIndex}`,
+        totalCount: c.packedItems.length,
+        totalWeight: c.packedItems.reduce((sum, item) => sum + item.weight, 0),
+        items: Array.from(itemMap.values()).sort((a, b) => b.count - a.count)
+      };
+    });
+  }, [containers, hasMultipleContainers, packedItems, container]);
+
   // Export Loading Manifest CSV
   const handleExportManifestCsv = () => {
     const headers = [
@@ -220,6 +254,58 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
         </div>
       </div>
 
+      {/* Container Cargo Breakdown Summary Pills */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+            <Box className="w-3.5 h-3.5 text-blue-600" />
+            {isJa ? 'コンテナ別 積載品目・個数クイック集計' : 'Cargo Quantities per Container Summary'}
+          </span>
+          <span className="text-[10px] text-slate-400">
+            {isJa ? 'クリックで検索フィルター適用' : 'Click item to filter'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          {containerCargoSummaries.map((cSummary, idx) => (
+            <div key={idx} className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-1.5 mb-2">
+                <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                  <span className="w-4 h-4 rounded bg-blue-600 text-white text-[10px] font-mono flex items-center justify-center font-bold">
+                    #{cSummary.containerIndex}
+                  </span>
+                  {cSummary.containerName}
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">
+                  {cSummary.totalCount} {isJa ? '個' : 'pcs'} ({formatWeightCompact(cSummary.totalWeight, unitSystem)})
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {cSummary.items.map((item, iIdx) => (
+                  <button
+                    key={iIdx}
+                    type="button"
+                    onClick={() => setSearchQuery(item.sku)}
+                    title={`${item.name} (${item.sku})`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 hover:border-blue-300 text-[11px] font-medium transition-colors"
+                  >
+                    <span 
+                      className="w-2 h-2 rounded-xs shrink-0" 
+                      style={{ backgroundColor: item.color }} 
+                    />
+                    <span className="truncate max-w-[110px] font-semibold">{item.name}:</span>
+                    <span className="font-mono font-bold text-blue-600 bg-blue-50/80 px-1 rounded text-[10px]">
+                      {item.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Manifest Table */}
       <div className="overflow-x-auto overflow-y-auto max-h-[380px] rounded-xl border border-slate-200 custom-scrollbar">
         <table className="w-full text-left text-xs border-collapse">
@@ -247,17 +333,17 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
               )}
               <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '品名 / SKU' : 'Item Name & SKU'}</th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
-                {isJa ? `配置座標 (X, Y, Z ${unitSystem === 'imperial' ? 'in' : 'mm'})` : `Position (${unitSystem === 'imperial' ? 'in' : 'mm'})`}
+                {isJa ? '配置座標 (X, Y, Z mm)' : 'Position (mm)'}
               </th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
-                {isJa ? `寸法 (L×W×H ${unitSystem === 'imperial' ? 'in' : 'mm'})` : `Dimensions (${unitSystem === 'imperial' ? 'in' : 'mm'})`}
+                {isJa ? '寸法 (L×W×H mm)' : 'Dimensions (mm)'}
               </th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
                 <button 
                   onClick={() => { setSortField('weight'); setSortAsc(!sortAsc); }}
                   className="flex items-center gap-1 hover:text-slate-900"
                 >
-                  <span>{isJa ? `単体 / 累積重量 (${unitSystem === 'imperial' ? 'lbs' : 'kg'})` : `Weight / Total (${unitSystem === 'imperial' ? 'lbs' : 'kg'})`}</span>
+                  <span>{isJa ? '単体 / 累積重量 (kg)' : 'Weight / Total (kg)'}</span>
                   <ArrowUpDown className="w-3 h-3" />
                 </button>
               </th>
