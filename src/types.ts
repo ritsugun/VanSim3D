@@ -3,9 +3,49 @@ export type Language = 'ja' | 'en';
 
 export type AlgorithmType = 
   | 'extreme_points_bfd' 
+  | 'genetic_algorithm'
   | 'wall_building' 
   | 'layer_stacking' 
-  | 'weight_balanced';
+  | 'weight_balanced'
+  | 'block_building'
+  | 'beam_search';
+
+export type GAOptimizationGoal = 
+  | 'max_volume'          // Maximize Volume (容積充填率 最大化)
+  | 'min_containers'      // Minimize Container Count (コンテナ本数 最小化)
+  | 'balance_weight';     // Balance Weight Distribution (重量配分・軸重バランス)
+
+export interface GAGoalConfig {
+  goal: GAOptimizationGoal;
+  volumeWeight?: number;
+  cogBalanceWeight?: number;
+  lowCenterWeight?: number;
+  priorityWeight?: number;
+}
+
+export interface GAParameterInfo {
+  populationSize: number;
+  generations: number;
+  crossoverType: string;
+  crossoverRate: number;
+  mutationRates: {
+    swap: number;
+    inversion: number;
+    rotation: number;
+    priorityShift: number;
+  };
+  elitismCount: number;
+  tournamentSize: number;
+  fitnessWeights: {
+    volumeWeight: number;
+    cogBalanceWeight: number;
+    lowCenterWeight: number;
+    priorityWeight: number;
+    unplacedPenalty: number;
+  };
+  evaluationPointsLimit: number;
+  bestFitnessScore?: number;
+}
 
 export interface Container {
   id: string;
@@ -136,6 +176,7 @@ export interface PackingResult {
   unplacedItems: UnplacedItem[];
   metrics: PackingMetrics;
   overallMetrics?: OverallPackingMetrics;
+  gaParameters?: GAParameterInfo;
 }
 
 export interface AiConsultantResponse {
@@ -146,3 +187,39 @@ export interface AiConsultantResponse {
   dunnageAdvice: string;
   actionableTips: string[];
 }
+
+export type AutoSelectCriteria = 'overall_best' | 'max_volume' | 'min_containers' | 'max_stability' | 'fastest';
+
+export interface AlgorithmBenchmarkEntry {
+  id: string;
+  algorithm: AlgorithmType;
+  gaConfig?: GAGoalConfig;
+  nameJa: string;
+  nameEn: string;
+  strategyLabelJa: string;
+  strategyLabelEn: string;
+  descriptionJa: string;
+  descriptionEn: string;
+  suitabilityJa: string;
+  suitabilityEn: string;
+  tag: string;
+  result: PackingResult;
+  score: number; // 0..100 composite score
+  volumeUtilization: number; // %
+  weightUtilization: number; // %
+  containersCount: number;
+  unplacedCount: number;
+  packedCount: number;
+  totalItemsCount: number;
+  cogOffsetX: number; // %
+  cogOffsetY: number; // %
+  cogStabilityScore: number; // 0..100
+  calculationTimeMs: number;
+  estimatedCost: number;
+  isBestVolume?: boolean;
+  isBestContainers?: boolean;
+  isBestStability?: boolean;
+  isOverallBest?: boolean;
+  isFastest?: boolean;
+}
+

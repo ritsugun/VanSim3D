@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import confetti from 'canvas-confetti';
-import { Container, CargoItem, PackedItem, PackingResult, AlgorithmType, UnitSystem, Language } from './types';
+import { Container, CargoItem, PackedItem, PackingResult, AlgorithmType, UnitSystem, Language, GAGoalConfig, AutoSelectCriteria } from './types';
 import { STANDARD_CONTAINERS, SAMPLE_CARGO_PRESETS } from './data/presets';
-import { run3DPackingOptimizer } from './services/packingOptimizer';
+import { run3DPackingOptimizer, runAllAlgorithmsBenchmark, getBestAlgorithmForCriteria } from './services/packingOptimizer';
 import { Header } from './components/Header';
+import { AlgorithmSettingsPanel } from './components/AlgorithmSettingsPanel';
 import { ContainerViewer3D } from './components/ContainerViewer3D';
 import { CargoManager } from './components/CargoManager';
 import { ContainerSelector } from './components/ContainerSelector';
 import { PackingAnalytics } from './components/PackingAnalytics';
 import { LoadingGuideTable } from './components/LoadingGuideTable';
 import { AiConsultantModal } from './components/AiConsultantModal';
+import { AlgorithmComparisonModal } from './components/AlgorithmComparisonModal';
 import { 
   Box, BarChart3, ListOrdered, Truck, Sparkles, 
-  Layers, Sliders, CheckCircle2, ShieldAlert 
+  Layers, Sliders, CheckCircle2, ShieldAlert, Zap, Bot 
 } from 'lucide-react';
 
 export default function App() {
@@ -20,6 +22,10 @@ export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [unitSystem, setUnitSystem] = useState<UnitSystem>('metric');
   const [algorithm, setAlgorithm] = useState<AlgorithmType>('extreme_points_bfd');
+  const [gaConfig, setGaConfig] = useState<GAGoalConfig>({ goal: 'max_volume' });
+  const [isAutoAlgorithmEnabled, setIsAutoAlgorithmEnabled] = useState<boolean>(false);
+  const [autoSelectCriteria, setAutoSelectCriteria] = useState<AutoSelectCriteria>('overall_best');
+
   const [selectedContainer, setSelectedContainer] = useState<Container>(STANDARD_CONTAINERS[1]); // 40GP default
   const [cargoList, setCargoList] = useState<CargoItem[]>(SAMPLE_CARGO_PRESETS[0].items); // HVAC CSV Dataset default
   const [containerCountMode, setContainerCountMode] = useState<'auto' | 'manual'>('auto');
@@ -28,15 +34,37 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'3d' | 'cargo' | 'container' | 'analytics' | 'manifest'>('3d');
   const [selectedItem, setSelectedItem] = useState<PackedItem | null>(null);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
+  const [isBenchmarkModalOpen, setIsBenchmarkModalOpen] = useState<boolean>(false);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
+  const [showAlgorithmPanel, setShowAlgorithmPanel] = useState<boolean>(false);
 
   const isJa = language === 'ja';
 
-  // Run Packing Optimization Calculation with fleet support
+  // Compute Auto-Selected Best Algorithm across all 7 strategies ONLY when Auto Mode is enabled
+  const autoBenchmarkResult = useMemo(() => {
+    if (!isAutoAlgorithmEnabled) return null;
+    const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
+    return runAllAlgorithmsBenchmark(selectedContainer, cargoList, countParam);
+  }, [isAutoAlgorithmEnabled, selectedContainer, cargoList, containerCountMode, containerCount]);
+
+  const autoSelectedEntry = useMemo(() => {
+    if (!autoBenchmarkResult) return null;
+    return getBestAlgorithmForCriteria(autoBenchmarkResult, autoSelectCriteria);
+  }, [autoBenchmarkResult, autoSelectCriteria]);
+
+  // Effective Algorithm & GA Config (Determined either by Auto Mode or Manual Selection)
+  const effectiveAlgorithm = isAutoAlgorithmEnabled && autoSelectedEntry 
+    ? autoSelectedEntry.algorithm 
+    : algorithm;
+  const effectiveGaConfig = isAutoAlgorithmEnabled && autoSelectedEntry
+    ? (autoSelectedEntry.gaConfig || gaConfig) 
+    : gaConfig;
+
+  // Run Packing Optimization Calculation with fleet support and GA target goals
   const packingResult: PackingResult = useMemo(() => {
     const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
-    return run3DPackingOptimizer(selectedContainer, cargoList, algorithm, countParam);
-  }, [selectedContainer, cargoList, algorithm, containerCountMode, containerCount]);
+    return run3DPackingOptimizer(selectedContainer, cargoList, effectiveAlgorithm, countParam, effectiveGaConfig);
+  }, [selectedContainer, cargoList, effectiveAlgorithm, containerCountMode, containerCount, effectiveGaConfig]);
 
   // Re-optimize action trigger with subtle celebration effect
   const handleReoptimize = useCallback(() => {
@@ -57,6 +85,27 @@ export default function App() {
     }, 250);
   }, [packingResult]);
 
+  // Apply algorithm from benchmark or selector with subtle celebration
+  const handleApplyAlgorithm = useCallback((newAlgo: AlgorithmType, newGaConfig?: GAGoalConfig) => {
+    setAlgorithm(newAlgo);
+    if (newGaConfig) {
+      setGaConfig(newGaConfig);
+    }
+    setIsCalculating(true);
+    setTimeout(() => {
+      setIsCalculating(false);
+      try {
+        confetti({
+          particleCount: 35,
+          spread: 55,
+          origin: { y: 0.85 }
+        });
+      } catch (e) {
+        // Ignore if unavailable
+      }
+    }, 200);
+  }, []);
+
   const totalItemCount = useMemo(() => {
     return cargoList.reduce((s, c) => s + c.quantity, 0);
   }, [cargoList]);
@@ -65,19 +114,60 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       {/* Top Header */}
       <Header
-        algorithm={algorithm}
-        onChangeAlgorithm={setAlgorithm}
+        algorithm={effectiveAlgorithm}
+        onChangeAlgorithm={(newAlgo) => {
+          setIsAutoAlgorithmEnabled(false);
+          setAlgorithm(newAlgo);
+        }}
+        gaConfig={effectiveGaConfig}
+        onChangeGaConfig={(newConfig) => {
+          setIsAutoAlgorithmEnabled(false);
+          setGaConfig(newConfig);
+        }}
+        isAutoAlgorithmEnabled={isAutoAlgorithmEnabled}
+        onToggleAutoAlgorithm={setIsAutoAlgorithmEnabled}
+        autoSelectCriteria={autoSelectCriteria}
+        onChangeAutoCriteria={setAutoSelectCriteria}
+        autoSelectedAlgorithmName={autoSelectedEntry ? (isJa ? autoSelectedEntry.nameJa : autoSelectedEntry.nameEn) : undefined}
         language={language}
         onChangeLanguage={setLanguage}
         unitSystem={unitSystem}
         onChangeUnitSystem={setUnitSystem}
         onOpenAiConsultant={() => setIsAiModalOpen(true)}
+        onOpenBenchmarkModal={() => setIsBenchmarkModalOpen(true)}
         onReoptimize={handleReoptimize}
         isCalculating={isCalculating}
+        showAlgorithmPanel={showAlgorithmPanel}
+        onToggleAlgorithmPanel={() => setShowAlgorithmPanel(!showAlgorithmPanel)}
       />
 
       {/* Main Content Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 space-y-4">
+        
+        {/* Algorithm Settings & Target Optimization Panel (Hidden by default, toggleable via Header) */}
+        {showAlgorithmPanel && (
+          <AlgorithmSettingsPanel
+            algorithm={effectiveAlgorithm}
+            gaConfig={effectiveGaConfig}
+            gaParameters={packingResult.gaParameters}
+            onChangeAlgorithm={(newAlgo) => {
+              setIsAutoAlgorithmEnabled(false);
+              setAlgorithm(newAlgo);
+            }}
+            onChangeGaConfig={(newConfig) => {
+              setIsAutoAlgorithmEnabled(false);
+              setGaConfig(newConfig);
+            }}
+            isAutoAlgorithmEnabled={isAutoAlgorithmEnabled}
+            onToggleAutoAlgorithm={setIsAutoAlgorithmEnabled}
+            autoSelectCriteria={autoSelectCriteria}
+            onChangeAutoCriteria={setAutoSelectCriteria}
+            autoSelectedAlgorithmName={autoSelectedEntry ? (isJa ? autoSelectedEntry.nameJa : autoSelectedEntry.nameEn) : undefined}
+            onOpenBenchmarkModal={() => setIsBenchmarkModalOpen(true)}
+            language={language}
+          />
+        )}
+
         {/* Navigation Tabs */}
         <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5 overflow-x-auto custom-scrollbar">
           <div className="flex items-center gap-1.5 text-xs font-semibold">
@@ -162,20 +252,51 @@ export default function App() {
             </button>
           </div>
 
-          {/* Quick Summary Pill on Right */}
-          <div className="hidden lg:flex items-center gap-3 text-xs bg-white border border-slate-200 px-3.5 py-1.5 rounded-lg text-slate-600 shadow-xs">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              {isJa ? 'コンテナ台数:' : 'Containers:'} <strong className="text-slate-900 font-mono font-bold">{packingResult.containers?.length || 1} {isJa ? '台' : 'units'}</strong>
-            </span>
-            <span className="text-slate-300">|</span>
-            <span>
-              {isJa ? '積載完了:' : 'Packed:'} <strong className="text-blue-600 font-mono font-bold">{packingResult.packedItems.length} / {totalItemCount}</strong>
-            </span>
-            <span className="text-slate-300">|</span>
-            <span>
-              {isJa ? '積載重量:' : 'Weight:'} <strong className="text-emerald-600 font-mono font-bold">{packingResult.metrics.packedWeightKg.toLocaleString()} kg</strong>
-            </span>
+          {/* Quick Summary Pill & Benchmark Trigger on Right */}
+          <div className="hidden lg:flex items-center gap-2.5 text-xs">
+            {/* Auto Mode Quick Toggle in Tab bar */}
+            <button
+              id="tabbar-auto-mode-toggle-btn"
+              type="button"
+              onClick={() => setIsAutoAlgorithmEnabled(!isAutoAlgorithmEnabled)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold border transition-all active:scale-95 shadow-xs ${
+                isAutoAlgorithmEnabled
+                  ? 'bg-blue-600 text-white border-blue-700'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+              title={isJa ? '自動アルゴリズム切り替えのON/OFF' : 'Toggle Auto Algorithm Switching'}
+            >
+              <Bot className={`w-3.5 h-3.5 ${isAutoAlgorithmEnabled ? 'text-yellow-300' : 'text-slate-500'}`} />
+              <span>{isJa ? '自動選定:' : 'Auto Mode:'}</span>
+              <span className={`font-mono font-extrabold ${isAutoAlgorithmEnabled ? 'text-yellow-300' : 'text-slate-500'}`}>
+                {isAutoAlgorithmEnabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            <button
+              id="tabbar-benchmark-btn"
+              type="button"
+              onClick={() => setIsBenchmarkModalOpen(true)}
+              className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold px-3 py-1.5 rounded-lg shadow-xs transition-all active:scale-95 group"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500 group-hover:scale-110 transition-transform" />
+              <span>{isJa ? '⚡ 一括比較・最適化' : '⚡ Benchmark & Compare'}</span>
+            </button>
+
+            <div className="flex items-center gap-3 bg-white border border-slate-200 px-3.5 py-1.5 rounded-lg text-slate-600 shadow-xs">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                {isJa ? 'コンテナ台数:' : 'Containers:'} <strong className="text-slate-900 font-mono font-bold">{packingResult.containers?.length || 1} {isJa ? '台' : 'units'}</strong>
+              </span>
+              <span className="text-slate-300">|</span>
+              <span>
+                {isJa ? '積載完了:' : 'Packed:'} <strong className="text-blue-600 font-mono font-bold">{packingResult.packedItems.length} / {totalItemCount}</strong>
+              </span>
+              <span className="text-slate-300">|</span>
+              <span>
+                {isJa ? '積載重量:' : 'Weight:'} <strong className="text-emerald-600 font-mono font-bold">{packingResult.metrics.packedWeightKg.toLocaleString()} kg</strong>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -341,6 +462,27 @@ export default function App() {
         metrics={packingResult.metrics}
         language={language}
       />
+
+      {/* Algorithm Benchmark & Comparison Modal */}
+      {isBenchmarkModalOpen && (
+        <AlgorithmComparisonModal
+          isOpen={isBenchmarkModalOpen}
+          onClose={() => setIsBenchmarkModalOpen(false)}
+          container={selectedContainer}
+          cargoList={cargoList}
+          containerCountMode={containerCountMode}
+          containerCount={containerCount}
+          currentAlgorithm={effectiveAlgorithm}
+          currentGaConfig={effectiveGaConfig}
+          isAutoAlgorithmEnabled={isAutoAlgorithmEnabled}
+          onToggleAutoAlgorithm={setIsAutoAlgorithmEnabled}
+          autoSelectCriteria={autoSelectCriteria}
+          onChangeAutoCriteria={setAutoSelectCriteria}
+          onApplyAlgorithm={handleApplyAlgorithm}
+          language={language}
+          unitSystem={unitSystem}
+        />
+      )}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-3.5 px-6 text-center text-xs text-slate-500">
