@@ -183,6 +183,12 @@ export const Header: React.FC<HeaderProps> = ({
                 <option value="layer_stacking" className="bg-white text-slate-900">
                   {isJa ? 'レイヤースタッキング (均一多段積み)' : 'Layer Stacking (Flat Density)'}
                 </option>
+                <option value="block_building" className="bg-white text-slate-900">
+                  {isJa ? 'ブロックビルディング (組積・荷崩れ防止)' : 'Block-Building (Composite Blocks)'}
+                </option>
+                <option value="beam_search" className="bg-white text-slate-900">
+                  {isJa ? 'ビームサーチ探索 (先読み最適化)' : 'Beam Search (Lookahead Tree)'}
+                </option>
               </select>
             )}
 

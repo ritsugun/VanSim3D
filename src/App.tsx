@@ -252,51 +252,20 @@ export default function App() {
             </button>
           </div>
 
-          {/* Quick Summary Pill & Benchmark Trigger on Right */}
-          <div className="hidden lg:flex items-center gap-2.5 text-xs">
-            {/* Auto Mode Quick Toggle in Tab bar */}
-            <button
-              id="tabbar-auto-mode-toggle-btn"
-              type="button"
-              onClick={() => setIsAutoAlgorithmEnabled(!isAutoAlgorithmEnabled)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold border transition-all active:scale-95 shadow-xs ${
-                isAutoAlgorithmEnabled
-                  ? 'bg-blue-600 text-white border-blue-700'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-              title={isJa ? '自動アルゴリズム切り替えのON/OFF' : 'Toggle Auto Algorithm Switching'}
-            >
-              <Bot className={`w-3.5 h-3.5 ${isAutoAlgorithmEnabled ? 'text-yellow-300' : 'text-slate-500'}`} />
-              <span>{isJa ? '自動選定:' : 'Auto Mode:'}</span>
-              <span className={`font-mono font-extrabold ${isAutoAlgorithmEnabled ? 'text-yellow-300' : 'text-slate-500'}`}>
-                {isAutoAlgorithmEnabled ? 'ON' : 'OFF'}
-              </span>
-            </button>
-
-            <button
-              id="tabbar-benchmark-btn"
-              type="button"
-              onClick={() => setIsBenchmarkModalOpen(true)}
-              className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold px-3 py-1.5 rounded-lg shadow-xs transition-all active:scale-95 group"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500 group-hover:scale-110 transition-transform" />
-              <span>{isJa ? '⚡ 一括比較・最適化' : '⚡ Benchmark & Compare'}</span>
-            </button>
-
-            <div className="flex items-center gap-3 bg-white border border-slate-200 px-3.5 py-1.5 rounded-lg text-slate-600 shadow-xs">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                {isJa ? 'コンテナ台数:' : 'Containers:'} <strong className="text-slate-900 font-mono font-bold">{packingResult.containers?.length || 1} {isJa ? '台' : 'units'}</strong>
-              </span>
-              <span className="text-slate-300">|</span>
-              <span>
-                {isJa ? '積載完了:' : 'Packed:'} <strong className="text-blue-600 font-mono font-bold">{packingResult.packedItems.length} / {totalItemCount}</strong>
-              </span>
-              <span className="text-slate-300">|</span>
-              <span>
-                {isJa ? '積載重量:' : 'Weight:'} <strong className="text-emerald-600 font-mono font-bold">{packingResult.metrics.packedWeightKg.toLocaleString()} kg</strong>
-              </span>
-            </div>
+          {/* Quick Summary Metrics Pill on Right */}
+          <div className="hidden lg:flex items-center gap-3 bg-white border border-slate-200 px-3.5 py-1.5 rounded-lg text-slate-600 shadow-xs text-xs">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              {isJa ? 'コンテナ台数:' : 'Containers:'} <strong className="text-slate-900 font-mono font-bold">{packingResult.containers?.length || 1} {isJa ? '台' : 'units'}</strong>
+            </span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {isJa ? '積載完了:' : 'Packed:'} <strong className="text-blue-600 font-mono font-bold">{packingResult.packedItems.length} / {totalItemCount}</strong>
+            </span>
+            <span className="text-slate-300">|</span>
+            <span>
+              {isJa ? '積載重量:' : 'Weight:'} <strong className="text-emerald-600 font-mono font-bold">{packingResult.metrics.packedWeightKg.toLocaleString()} kg</strong>
+            </span>
           </div>
         </div>
 
@@ -335,8 +304,9 @@ export default function App() {
         )}
 
         {activeTab === 'cargo' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            {/* Cargo Manifest Area (Narrowed for compact efficiency) */}
+            <div className="lg:col-span-5 xl:col-span-5">
               <CargoManager
                 cargoList={cargoList}
                 onChangeCargoList={setCargoList}
@@ -349,8 +319,10 @@ export default function App() {
                 }}
               />
             </div>
-            <div className="lg:col-span-4 h-full">
-              <div className="h-full min-h-[460px]">
+
+            {/* 3D Container Packing Viewport Area (Expanded wider) */}
+            <div className="lg:col-span-7 xl:col-span-7 sticky top-4">
+              <div className="w-full h-[580px] xl:h-[640px] rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-900">
                 <ContainerViewer3D
                   container={selectedContainer}
                   containers={packingResult.containers}

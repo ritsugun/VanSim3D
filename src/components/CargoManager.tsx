@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { CargoItem, Container, UnitSystem, Language } from '../types';
 import { SAMPLE_CARGO_PRESETS, CargoPreset, SAMPLE_CSV_TEMPLATE } from '../data/presets';
 import { 
-  Plus, Trash2, Copy, Upload, Download, Sparkles, 
+  Plus, Trash2, Upload, Download, Sparkles, 
   ShieldAlert, Check, FileSpreadsheet, FileDown,
-  Edit2, ChevronDown, ChevronUp, CheckCircle2, RotateCw, Sliders
+  Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
 
@@ -64,7 +64,8 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     allowYaw: true,
     maxStackWeight: 120,
     fragile: false,
-    priority: 3
+    priority: 3,
+    enabled: true
   });
 
   const isJa = language === 'ja';
@@ -79,7 +80,8 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       width: Math.max(10, Number(newItem.width)),
       height: Math.max(10, Number(newItem.height)),
       weight: Math.max(0.1, Number(newItem.weight)),
-      quantity: Math.max(1, Number(newItem.quantity || 1))
+      quantity: Math.max(1, Number(newItem.quantity || 1)),
+      enabled: true
     };
     onChangeCargoList([...cargoList, created]);
     setIsAddingNew(false);
@@ -98,24 +100,14 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       allowYaw: true,
       maxStackWeight: 100,
       fragile: false,
-      priority: 3
+      priority: 3,
+      enabled: true
     });
   };
 
   // Delete Item
   const handleDeleteItem = (id: string) => {
     onChangeCargoList(cargoList.filter(c => c.id !== id));
-  };
-
-  // Duplicate Item
-  const handleDuplicateItem = (item: CargoItem) => {
-    const dup: CargoItem = {
-      ...item,
-      id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      sku: `${item.sku}-CP`,
-      name: `${item.name} (${isJa ? '複製' : 'Copy'})`
-    };
-    onChangeCargoList([...cargoList, dup]);
   };
 
   // Update item field directly
@@ -125,18 +117,23 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     );
   };
 
+  // Bulk enable / disable all
+  const handleToggleAll = (enable: boolean) => {
+    onChangeCargoList(cargoList.map(c => ({ ...c, enabled: enable })));
+  };
+
   // Load Preset
   const handleLoadPreset = (preset: CargoPreset) => {
-    onChangeCargoList(preset.items);
+    onChangeCargoList(preset.items.map(it => ({ ...it, enabled: it.enabled !== false })));
     if (onSelectContainer && preset.recommendedContainerId) {
       onSelectContainer(preset.recommendedContainerId);
     }
     setShowPresetsModal(false);
   };
 
-  // Export CSV (Following schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0))
+  // Export CSV (Following schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0),積載対象(1/0))
   const handleExportCsv = () => {
-    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)'];
+    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)', '積載対象(1/0)'];
     const rows = cargoList.map(c => [
       `"${c.name}"`,
       c.width,
@@ -146,7 +143,8 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       c.quantity,
       c.allowYaw !== false ? 1 : 0,
       c.color,
-      c.fragile ? 1 : 0
+      c.fragile ? 1 : 0,
+      c.enabled !== false ? 1 : 0
     ]);
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -173,7 +171,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Import CSV - Smart detection for both the 10-column (with 割れ物) & legacy 9-column format
+  // Import CSV - Smart detection for both the 10-column & 11-column format
   const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -201,6 +199,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       let rotIdx = headerParts.findIndex(h => /横回転|3D回転|回転許可|回転|Rotate|Rotation|Yaw/i.test(h));
       let colorIdx = headerParts.findIndex(h => /カラー|色|Color|Hex/i.test(h));
       let fragileIdx = headerParts.findIndex(h => /割れ物|天地無用|壊れ物|壊れもの|Fragile/i.test(h));
+      let enabledIdx = headerParts.findIndex(h => /積載対象|積載|対象|Enabled|Active|Include|Select/i.test(h));
 
       // Positional fallbacks
       if (nameIdx === -1) nameIdx = 0;
@@ -243,6 +242,13 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           isFragile = itemHeight > 1800;
         }
 
+        // Explicit Enabled / Selected Flag Check
+        let isEnabled = true;
+        if (enabledIdx !== -1 && parts[enabledIdx] !== undefined && parts[enabledIdx] !== '') {
+          const rawEn = parts[enabledIdx].toLowerCase().trim();
+          isEnabled = rawEn === '1' || rawEn === 'true' || rawEn === 'yes' || rawEn === 'ok' || rawEn === '対象';
+        }
+
         newItems.push({
           id: `csv_${Date.now()}_${i}`,
           sku: itemName,
@@ -258,13 +264,14 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           allowYaw: allowRot,
           maxStackWeight: isFragile ? 0 : (itemHeight > 1800 ? 0 : 150),
           fragile: isFragile,
-          priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3)
+          priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3),
+          enabled: isEnabled
         });
       }
 
       if (newItems.length > 0) {
         onChangeCargoList(newItems);
-        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！（割れ物フラグ反映済）` : `Successfully imported ${newItems.length} cargo items from CSV with fragile flags!`);
+        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！（割れ物・積載フラグ反映済）` : `Successfully imported ${newItems.length} cargo items from CSV with settings!`);
         setTimeout(() => setImportNotification(null), 4000);
       }
     };
@@ -272,27 +279,78 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     e.target.value = '';
   };
 
-  // Calculate cargo summary
+  // Active / Selected items calculations
+  const activeCargoList = cargoList.filter(c => c.enabled !== false);
+  const activeCount = activeCargoList.length;
+  const totalCount = cargoList.length;
+  const hasDisabledItems = activeCount < totalCount;
+  const isAllSelected = totalCount > 0 && activeCount === totalCount;
+  const isNoneSelected = activeCount === 0;
+
   const totalQuantity = cargoList.reduce((sum, c) => sum + (c.quantity || 0), 0);
-  const totalVolumeCbm = cargoList.reduce((sum, c) => sum + (c.length * c.width * c.height * c.quantity) / 1_000_000_000, 0);
-  const totalWeightKg = cargoList.reduce((sum, c) => sum + (c.weight * c.quantity), 0);
+  const activeQuantity = activeCargoList.reduce((sum, c) => sum + (c.quantity || 0), 0);
+  
+  const activeVolumeCbm = activeCargoList.reduce((sum, c) => sum + (c.length * c.width * c.height * c.quantity) / 1_000_000_000, 0);
+  const activeWeightKg = activeCargoList.reduce((sum, c) => sum + (c.weight * c.quantity), 0);
   const containerVolCbm = (container.length * container.width * container.height) / 1_000_000_000;
 
   return (
     <div id="cargo-manager-root" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-slate-800 flex flex-col h-full">
       {/* Header with Title & Action Buttons */}
       <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100 flex-wrap">
-        <div>
+        <div className="flex items-center gap-2.5 flex-wrap">
           <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
             {isJa ? '積載貨物リスト (Cargo Manifest)' : 'Cargo Items'}
-            <span className="text-xs font-normal text-slate-500">
-              ({cargoList.length} {isJa ? '種類' : 'types'}, {totalQuantity} {isJa ? '個' : 'pcs'})
-            </span>
           </h2>
+          <div className="flex items-center gap-1.5 text-xs">
+            <span className={`px-2 py-0.5 rounded-full border font-semibold ${
+              hasDisabledItems 
+                ? 'bg-amber-50 text-amber-800 border-amber-200' 
+                : 'bg-blue-50 text-blue-700 border-blue-200'
+            }`}>
+              {isJa 
+                ? `積載対象: ${activeCount}/${totalCount} 種類 (${activeQuantity}/${totalQuantity} 個)` 
+                : `Active: ${activeCount}/${totalCount} types (${activeQuantity}/${totalQuantity} pcs)`}
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap text-xs">
+          {/* Quick Select All / Deselect All */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            <button
+              type="button"
+              id="select-all-cargo-btn"
+              onClick={() => handleToggleAll(true)}
+              disabled={isAllSelected}
+              title={isJa ? 'すべての貨物を積載対象にする' : 'Select all items'}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
+                isAllSelected 
+                  ? 'text-slate-400 cursor-not-allowed' 
+                  : 'bg-white text-blue-700 shadow-2xs hover:bg-blue-50'
+              }`}
+            >
+              <CheckCheck className="w-3.5 h-3.5" />
+              <span>{isJa ? '全選択' : 'Select All'}</span>
+            </button>
+            <button
+              type="button"
+              id="deselect-all-cargo-btn"
+              onClick={() => handleToggleAll(false)}
+              disabled={isNoneSelected}
+              title={isJa ? 'すべての貨物の積載を解除する' : 'Deselect all items'}
+              className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
+                isNoneSelected 
+                  ? 'text-slate-400 cursor-not-allowed' 
+                  : 'bg-white text-slate-700 shadow-2xs hover:bg-slate-50'
+              }`}
+            >
+              <XSquare className="w-3.5 h-3.5" />
+              <span>{isJa ? '全解除' : 'Deselect All'}</span>
+            </button>
+          </div>
+
           <button
             id="open-presets-btn"
             onClick={() => setShowPresetsModal(true)}
@@ -315,7 +373,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           <label 
             id="import-csv-label" 
             className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer font-medium flex items-center gap-1.5 transition-colors"
-            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,個数,横回転許可,カラー,割れ物)' : 'Import from CSV'}
+            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,個数,横回転許可,カラー,割れ物,積載対象)' : 'Import from CSV'}
           >
             <Upload className="w-3.5 h-3.5 text-emerald-600" />
             <span>{isJa ? 'CSV取込' : 'Import'}</span>
@@ -351,22 +409,28 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         </div>
       )}
 
-      {/* Real-Time Total Metrics vs Container Limit */}
+      {/* Real-Time Total Metrics for Active / Enabled Items vs Container Limit */}
       <div className="grid grid-cols-3 gap-2.5 mb-4 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
         <div>
-          <span className="text-slate-500 block text-[11px] font-medium">{isJa ? '総容積 (理論合計)' : 'Total Volume:'}</span>
+          <span className="text-slate-500 block text-[11px] font-medium">
+            {isJa ? '積載対象 総容積' : 'Active Volume:'}
+            {hasDisabledItems && <span className="text-amber-600 font-bold ml-1">({isJa ? '対象のみ' : 'Filtered'})</span>}
+          </span>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="font-mono font-bold text-blue-600 text-sm">
-              {formatVolume(totalVolumeCbm, unitSystem, 2)}
+              {formatVolume(activeVolumeCbm, unitSystem, 2)}
             </span>
             <span className="text-slate-400 text-[10px]">/ {formatVolume(containerVolCbm, unitSystem, 1)}</span>
           </div>
         </div>
         <div>
-          <span className="text-slate-500 block text-[11px] font-medium">{isJa ? '総重量 (理論合計)' : 'Total Weight:'}</span>
+          <span className="text-slate-500 block text-[11px] font-medium">
+            {isJa ? '積載対象 総重量' : 'Active Weight:'}
+            {hasDisabledItems && <span className="text-amber-600 font-bold ml-1">({isJa ? '対象のみ' : 'Filtered'})</span>}
+          </span>
           <div className="flex items-baseline gap-1 mt-0.5">
-            <span className={`font-mono font-bold text-sm ${totalWeightKg > container.maxWeight ? 'text-red-600' : 'text-emerald-600'}`}>
-              {formatWeight(totalWeightKg, unitSystem)}
+            <span className={`font-mono font-bold text-sm ${activeWeightKg > container.maxWeight ? 'text-red-600' : 'text-emerald-600'}`}>
+              {formatWeight(activeWeightKg, unitSystem)}
             </span>
             <span className="text-slate-400 text-[10px]">/ {formatWeight(container.maxWeight, unitSystem)}</span>
           </div>
@@ -374,10 +438,10 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         <div>
           <span className="text-slate-500 block text-[11px] font-medium">{isJa ? 'コンテナ利用率(目安)' : 'Est. Fill:'}</span>
           <div className="flex items-baseline gap-1 mt-0.5">
-            <span className={`font-mono font-bold text-sm ${totalVolumeCbm > containerVolCbm ? 'text-red-600' : 'text-slate-800'}`}>
-              {containerVolCbm > 0 ? ((totalVolumeCbm / containerVolCbm) * 100).toFixed(1) : 0}%
+            <span className={`font-mono font-bold text-sm ${activeVolumeCbm > containerVolCbm ? 'text-red-600' : 'text-slate-800'}`}>
+              {containerVolCbm > 0 ? ((activeVolumeCbm / containerVolCbm) * 100).toFixed(1) : 0}%
             </span>
-            {totalVolumeCbm > containerVolCbm && (
+            {activeVolumeCbm > containerVolCbm && (
               <span className="text-[10px] text-red-600 font-bold ml-1">({isJa ? '容量超過' : 'Over'})</span>
             )}
           </div>
@@ -540,7 +604,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       )}
 
       {/* Cargo List Items Table */}
-      <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 max-h-[420px] custom-scrollbar">
+      <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 max-h-[540px] xl:max-h-[600px] custom-scrollbar">
         {cargoList.length === 0 ? (
           <div className="text-center py-10 text-slate-400 text-xs">
             <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 text-slate-300" />
@@ -549,129 +613,147 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         ) : (
           cargoList.map((cargo) => {
             const isEditing = editingItemId === cargo.id;
+            const isEnabled = cargo.enabled !== false;
 
             return (
               <div
                 key={cargo.id}
-                className={`bg-white border rounded-xl p-3 transition-all text-xs shadow-xs ${
-                  isEditing ? 'border-blue-500 ring-1 ring-blue-500/20 bg-blue-50/20' : 'border-slate-200 hover:border-slate-300'
+                className={`border rounded-xl p-3 transition-all text-xs shadow-xs ${
+                  isEditing 
+                    ? 'border-blue-500 ring-1 ring-blue-500/20 bg-blue-50/20' 
+                    : isEnabled
+                      ? 'bg-white border-slate-200 hover:border-slate-300'
+                      : 'bg-slate-50/80 border-slate-200/60 opacity-60 hover:opacity-90'
                 }`}
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <div
-                      className="w-4 h-4 rounded-full shrink-0 border border-black/15 shadow-2xs cursor-pointer"
-                      style={{ backgroundColor: cargo.color }}
-                      title={cargo.color}
-                      onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
-                    />
-                    <div className="truncate flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-slate-900 truncate">{cargo.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
-                          className="px-1.5 py-0.5 rounded bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 font-mono text-[10px] flex items-center gap-1 transition-colors"
-                        >
-                          <Edit2 className="w-3 h-3 text-slate-400" />
-                          <span>{isEditing ? (isJa ? '完了' : 'Done') : (isJa ? '寸法変更' : 'Edit Size')}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateItem(cargo.id, { 
-                            allowYaw: cargo.allowYaw === false ? true : false,
-                            allowTilt: false,
-                            allowRoll: false
-                          })}
-                          title={isJa ? 'クリックで横回転許可(天面維持・90度旋回)を切替' : 'Click to toggle horizontal rotation (keeping height upright)'}
-                          className={`text-[9px] px-1.5 py-0.5 rounded font-semibold cursor-pointer transition-colors border ${
-                            cargo.allowYaw !== false 
-                              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
-                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                          }`}
-                        >
-                          {isJa ? `横回転:${cargo.allowYaw !== false ? '1' : '0'}` : `Horizontal:${cargo.allowYaw !== false ? '1' : '0'}`}
-                        </button>
+                <div className="space-y-1.5">
+                  {/* Top Primary Row: Checkbox, Color, Name, and Actions (Qty, Edit, Delete) */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {/* Enable / Disable Checkbox Toggle */}
+                      <button
+                        type="button"
+                        id={`toggle-cargo-${cargo.id}`}
+                        onClick={() => handleUpdateItem(cargo.id, { enabled: !isEnabled })}
+                        title={isJa ? (isEnabled ? 'クリックして積載から除外' : 'クリックして積載対象に含める') : (isEnabled ? 'Click to exclude from packing' : 'Click to include in packing')}
+                        className={`p-0.5 rounded transition-colors ${
+                          isEnabled 
+                            ? 'text-blue-600 hover:bg-blue-50' 
+                            : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                        }`}
+                      >
+                        {isEnabled ? (
+                          <CheckSquare className="w-4 h-4" />
+                        ) : (
+                          <Square className="w-4 h-4" />
+                        )}
+                      </button>
 
-                        <button
-                          type="button"
-                          onClick={() => handleUpdateItem(cargo.id, { 
-                            fragile: !cargo.fragile,
-                            maxStackWeight: !cargo.fragile ? 0 : 150
-                          })}
-                          title={isJa ? 'クリックで割れ物(上積み禁止)を切替' : 'Click to toggle fragile'}
-                          className={`text-[9px] px-1.5 py-0.5 rounded font-bold cursor-pointer transition-colors flex items-center gap-0.5 border ${
-                            cargo.fragile
-                              ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
-                              : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
-                          }`}
-                        >
-                          <ShieldAlert className="w-3 h-3" />
-                          {cargo.fragile ? (isJa ? '割れ物:1' : 'Fragile:1') : (isJa ? '割れ物:0' : 'Fragile:0')}
-                        </button>
+                      {/* Color Indicator */}
+                      <div
+                        className="w-3 h-3 rounded-full shrink-0 border border-black/15 shadow-2xs cursor-pointer hover:scale-110 transition-transform"
+                        style={{ backgroundColor: cargo.color }}
+                        title={isJa ? `カラー: ${cargo.color} (クリックで編集)` : `Color: ${cargo.color}`}
+                        onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
+                      />
+
+                      {/* Cargo SKU / Name */}
+                      <span 
+                        className={`font-bold truncate text-xs ${isEnabled ? 'text-slate-900' : 'text-slate-400 line-through'}`}
+                        title={cargo.name}
+                      >
+                        {cargo.name}
+                      </span>
+                    </div>
+
+                    {/* Quantity & Action Controls */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5">
+                        <span className="text-[10px] text-slate-500 mr-1 font-medium">{isJa ? '数量:' : 'Qty:'}</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={cargo.quantity}
+                          onChange={(e) => {
+                            const val = Math.max(1, Number(e.target.value) || 1);
+                            handleUpdateItem(cargo.id, { quantity: val });
+                          }}
+                          className="w-9 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
+                        />
                       </div>
 
-                      {!isEditing && (
-                        <div className="text-[11px] text-slate-500 flex items-center gap-2.5 mt-1 flex-wrap">
-                          <span className="font-mono text-slate-700 font-semibold bg-slate-100 px-1.5 py-0.5 rounded">
-                            幅:{cargo.width} × 高:{cargo.height} × 奥:{cargo.length} mm
-                          </span>
-                          <span className="text-slate-300">|</span>
-                          <span className="text-emerald-600 font-bold font-mono">
-                            {formatWeightCompact(cargo.weight, unitSystem)}/個
-                          </span>
-                          <span className="text-slate-300">|</span>
-                          <span className="text-slate-600 font-mono text-[10px]">
-                            {isJa ? '小計' : 'Total'}: {formatVolume((cargo.length * cargo.width * cargo.height * cargo.quantity) / 1_000_000_000, unitSystem)}
-                          </span>
-                        </div>
-                      )}
+                      <button
+                        onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
+                        title={isJa ? '寸法・重量を編集' : 'Edit dimensions'}
+                        className={`p-1.5 rounded-md transition-colors ${
+                          isEditing ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => handleDeleteItem(cargo.id)}
+                        title={isJa ? '削除' : 'Delete'}
+                        className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Quantity Changer & Action Buttons */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
-                      <span className="text-[10px] text-slate-500 mr-1 font-medium">{isJa ? '個数:' : 'Qty:'}</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={cargo.quantity}
-                        onChange={(e) => {
-                          const val = Math.max(1, Number(e.target.value) || 1);
-                          handleUpdateItem(cargo.id, { 
-                            quantity: val
-                          });
-                        }}
-                        className="w-12 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
-                      />
+                  {/* Sub-row: Dimensions, Weight, and Quick Toggle Rules */}
+                  <div className="flex items-center justify-between gap-2 pt-0.5 text-[11px] text-slate-600 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono font-semibold bg-slate-100 px-1.5 py-0.5 rounded text-[10.5px] text-slate-700">
+                        {cargo.width} × {cargo.height} × {cargo.length} mm
+                      </span>
+                      <span className="text-emerald-600 font-bold font-mono text-[10.5px]">
+                        {formatWeightCompact(cargo.weight, unitSystem)}
+                      </span>
+                      <span className="text-slate-400 font-mono text-[10px]">
+                        ({formatVolume((cargo.length * cargo.width * cargo.height * cargo.quantity) / 1_000_000_000, unitSystem)})
+                      </span>
                     </div>
 
-                    <button
-                      onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
-                      title={isJa ? '寸法・重量を編集' : 'Edit dimensions'}
-                      className={`p-1.5 rounded-lg transition-colors ${
-                        isEditing ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {/* Horizontal Rotation Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(cargo.id, { 
+                          allowYaw: cargo.allowYaw === false ? true : false,
+                          allowTilt: false,
+                          allowRoll: false
+                        })}
+                        title={isJa ? 'クリックで横回転許可(天面維持・90度旋回)を切替' : 'Toggle horizontal rotation (keep height upright)'}
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors border flex items-center gap-1 ${
+                          cargo.allowYaw !== false 
+                            ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
+                            : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                        }`}
+                      >
+                        <RotateCw className="w-3 h-3" />
+                        <span>{isJa ? `横回転:${cargo.allowYaw !== false ? '可' : '否'}` : `Rot:${cargo.allowYaw !== false ? 'ON' : 'OFF'}`}</span>
+                      </button>
 
-                    <button
-                      onClick={() => handleDuplicateItem(cargo)}
-                      title={isJa ? '複製' : 'Duplicate'}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-slate-100 transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-
-                    <button
-                      onClick={() => handleDeleteItem(cargo.id)}
-                      title={isJa ? '削除' : 'Delete'}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      {/* Fragile Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateItem(cargo.id, { 
+                          fragile: !cargo.fragile,
+                          maxStackWeight: !cargo.fragile ? 0 : 150
+                        })}
+                        title={isJa ? 'クリックで割れ物(上積み禁止)を切替' : 'Toggle fragile'}
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors flex items-center gap-1 border ${
+                          cargo.fragile
+                            ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100 font-bold'
+                            : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                        }`}
+                      >
+                        <ShieldAlert className="w-3 h-3" />
+                        <span>{isJa ? `割れ物:${cargo.fragile ? '有' : '無'}` : `Fragile:${cargo.fragile ? 'YES' : 'NO'}`}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -748,21 +830,46 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                     </div>
 
                     <div className="flex items-center justify-between gap-2 pt-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-slate-400 font-medium">{isJa ? 'カラー:' : 'Color:'}</span>
-                        {COLOR_PALETTE.slice(0, 8).map(col => (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-slate-500 font-medium">{isJa ? '色:' : 'Color:'}</span>
+                        {COLOR_PALETTE.slice(0, 10).map(c => (
                           <button
-                            key={col}
+                            key={c}
                             type="button"
-                            onClick={() => handleUpdateItem(cargo.id, { color: col })}
-                            className={`w-3.5 h-3.5 rounded-full border transition-all ${cargo.color === col ? 'border-slate-900 scale-125' : 'border-transparent opacity-70'}`}
-                            style={{ backgroundColor: col }}
+                            onClick={() => handleUpdateItem(cargo.id, { color: c })}
+                            className={`w-3.5 h-3.5 rounded-full border transition-all ${cargo.color === c ? 'border-slate-800 scale-110 shadow-xs' : 'border-transparent opacity-70'}`}
+                            style={{ backgroundColor: c }}
                           />
                         ))}
                       </div>
-                      <span className="text-[10px] font-mono text-slate-500">
-                        {isJa ? '単体容積' : 'Unit Vol'}: {((cargo.length * cargo.width * cargo.height) / 1_000_000_000).toFixed(3)} m³
-                      </span>
+
+                      <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-1 cursor-pointer text-[10px] text-slate-700 font-medium">
+                          <input
+                            type="checkbox"
+                            checked={cargo.allowYaw !== false}
+                            onChange={e => handleUpdateItem(cargo.id, { 
+                              allowYaw: e.target.checked,
+                              allowTilt: false, 
+                              allowRoll: false 
+                            })}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 text-xs"
+                          />
+                          <span>{isJa ? '横回転' : 'Rot'}</span>
+                        </label>
+                        <label className="flex items-center gap-1 cursor-pointer text-[10px] text-red-700 font-medium">
+                          <input
+                            type="checkbox"
+                            checked={cargo.fragile}
+                            onChange={e => handleUpdateItem(cargo.id, { 
+                              fragile: e.target.checked,
+                              maxStackWeight: e.target.checked ? 0 : 150
+                            })}
+                            className="rounded border-slate-300 text-red-600 focus:ring-red-500 text-xs"
+                          />
+                          <span>{isJa ? '割れ物' : 'Fragile'}</span>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -772,82 +879,73 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         )}
       </div>
 
-      {/* Preset Cargo Selection Modal */}
+      {/* Presets Modal */}
       {showPresetsModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <div>
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-indigo-600" />
-                  {isJa ? 'シミュレーション用プリセットの選択' : 'Select Cargo Scenario'}
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col shadow-2xl border border-slate-200">
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                <h3 className="font-bold text-slate-900 text-sm">
+                  {isJa ? '混載貨物サンプルプリセット選択' : 'Select Cargo Preset'}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {isJa ? '実務物流シナリオに基づく代表的な貨物リストをワンクリックで反映します' : 'Choose preconfigured freight profiles for instant testing'}
-                </p>
               </div>
               <button
                 onClick={() => setShowPresetsModal(false)}
-                className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-colors font-bold text-sm"
+                className="text-slate-400 hover:text-slate-600 p-1 text-sm font-bold"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-3.5 max-h-[60vh]">
-              {SAMPLE_CARGO_PRESETS.map(preset => {
-                const pTotalQty = preset.items.reduce((s, i) => s + i.quantity, 0);
-                const pTotalCbm = preset.items.reduce((s, i) => s + (i.length * i.width * i.height * i.quantity) / 1_000_000_000, 0);
-                const pTotalKg = preset.items.reduce((s, i) => s + (i.weight * i.quantity), 0);
+            <div className="p-4 overflow-y-auto space-y-3 custom-scrollbar">
+              <p className="text-xs text-slate-600 mb-2">
+                {isJa 
+                  ? '実務の輸送シナリオに基づいた混載プリセットです。選択すると該当する貨物データが一括ロードされます。'
+                  : 'Realistic multi-cargo mix scenarios. Loading a preset will replace your current cargo manifest.'}
+              </p>
+
+              {SAMPLE_CARGO_PRESETS.map((preset) => {
+                const pQty = preset.items.reduce((s, i) => s + i.quantity, 0);
+                const pVol = preset.items.reduce((s, i) => s + (i.length * i.width * i.height * i.quantity) / 1_000_000_000, 0);
+                const pWt = preset.items.reduce((s, i) => s + (i.weight * i.quantity), 0);
 
                 return (
                   <div
                     key={preset.id}
+                    className="border border-slate-200 hover:border-indigo-400 rounded-xl p-3.5 hover:bg-indigo-50/20 transition-all cursor-pointer text-xs"
                     onClick={() => handleLoadPreset(preset)}
-                    className="group border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/40 rounded-xl p-4 transition-all cursor-pointer shadow-2xs hover:shadow-xs"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-slate-900 text-sm group-hover:text-indigo-700 transition-colors">
-                            {isJa ? preset.nameJa : preset.nameEn}
-                          </h4>
-                          {preset.id === 'hvac_equipment_csv' && (
-                            <span className="bg-indigo-100 text-indigo-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-indigo-200">
-                              添付CSVデータ
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                          {isJa ? preset.descriptionJa : preset.descriptionEn}
-                        </p>
+                    <div className="flex items-start justify-between gap-3 mb-1.5">
+                      <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                        {isJa ? preset.nameJa : preset.nameEn}
+                        {preset.recommendedContainerId && (
+                          <span className="text-[10px] font-normal px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full font-mono">
+                            {preset.recommendedContainerId.toUpperCase()}
+                          </span>
+                        )}
                       </div>
+                      <button
+                        type="button"
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shrink-0 shadow-xs"
+                      >
+                        {isJa ? '適用する' : 'Load'}
+                      </button>
                     </div>
 
-                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                      <div className="flex items-center gap-3 font-mono">
-                        <span>{pTotalQty} {isJa ? '個' : 'pcs'} ({preset.items.length} {isJa ? '品目' : 'SKUs'})</span>
-                        <span>•</span>
-                        <span className="text-blue-600 font-semibold">{formatVolume(pTotalCbm, unitSystem, 1)}</span>
-                        <span>•</span>
-                        <span className="text-emerald-600 font-semibold">{formatWeightCompact(pTotalKg, unitSystem)}</span>
-                      </div>
-                      <span className="text-indigo-600 font-bold text-xs group-hover:translate-x-0.5 transition-transform">
-                        {isJa ? 'このプリセットを適用 →' : 'Apply Preset →'}
-                      </span>
+                    <p className="text-slate-500 text-[11px] mb-2 leading-relaxed">
+                      {isJa ? preset.descriptionJa : preset.descriptionEn}
+                    </p>
+
+                    <div className="flex items-center gap-3 text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg font-mono">
+                      <span>{isJa ? '品目数' : 'Types'}: <strong className="text-slate-800">{preset.items.length}</strong></span>
+                      <span>{isJa ? '総数量' : 'Total Qty'}: <strong className="text-amber-600">{pQty}個</strong></span>
+                      <span>{isJa ? '総容積' : 'Vol'}: <strong className="text-blue-600">{formatVolume(pVol, unitSystem, 1)}</strong></span>
+                      <span>{isJa ? '総重量' : 'Wt'}: <strong className="text-emerald-600">{formatWeight(pWt, unitSystem)}</strong></span>
                     </div>
                   </div>
                 );
               })}
-            </div>
-
-            <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end">
-              <button
-                onClick={() => setShowPresetsModal(false)}
-                className="px-4 py-1.5 text-xs text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors"
-              >
-                {isJa ? '閉じる' : 'Cancel'}
-              </button>
             </div>
           </div>
         </div>

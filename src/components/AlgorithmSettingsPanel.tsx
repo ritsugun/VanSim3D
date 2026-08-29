@@ -79,6 +79,22 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
       descJa: '高さを揃えて水平な層を形成しながら下から順に積み上げる方式',
       descEn: 'Creates flat horizontal layers for maximum tier stability',
       tag: 'HEURISTIC'
+    },
+    {
+      id: 'block_building',
+      nameJa: 'ブロックビルディング (組積・荷崩れ防止)',
+      nameEn: 'Block-Building (Composite Blocks)',
+      descJa: '同種品目を複合ブロック化して配置し、100%フラットな底面支持と荷崩れ防止を最優先',
+      descEn: 'Pre-assembles identical items into solid 3D composite blocks ensuring 100% base support',
+      tag: 'STABILITY FIRST'
+    },
+    {
+      id: 'beam_search',
+      nameJa: 'ビームサーチ探索 (先読み最適化)',
+      nameEn: 'Beam Search (Lookahead Tree)',
+      descJa: '上位K個の有望な積載状態を同時に保持・先読み探索し、高速・高密度・安定配置を実現',
+      descEn: 'Explores top-K partial loading states simultaneously with multi-step lookahead',
+      tag: 'TREE SEARCH'
     }
   ];
 

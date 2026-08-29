@@ -78,6 +78,7 @@ export interface CargoItem {
   fragile?: boolean;   // If fragile, nothing can be stacked on top (or max stack weight = 0)
   priority?: number;   // 1 = High / Load first (or unload last), 3 = Normal, 5 = Unload first (at door)
   group?: string;
+  enabled?: boolean;   // true = 積載対象 (デフォルト), false = 積載除外 (スキップ)
 }
 
 export interface PackedItem {
