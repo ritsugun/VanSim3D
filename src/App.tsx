@@ -112,7 +112,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
-      {/* Top Header */}
+      {/* Top Header with Sticky Navigation & Status Ribbon */}
       <Header
         algorithm={effectiveAlgorithm}
         onChangeAlgorithm={(newAlgo) => {
@@ -139,6 +139,13 @@ export default function App() {
         isCalculating={isCalculating}
         showAlgorithmPanel={showAlgorithmPanel}
         onToggleAlgorithmPanel={() => setShowAlgorithmPanel(!showAlgorithmPanel)}
+        activeTab={activeTab}
+        onChangeTab={setActiveTab}
+        totalItemCount={totalItemCount}
+        containerUnitsCount={packingResult.containers?.length || 1}
+        volumeUtilization={packingResult.metrics.volumeUtilization}
+        packedItemCount={packingResult.packedItems.length}
+        packedWeightKg={packingResult.metrics.packedWeightKg}
       />
 
       {/* Main Content Body */}
@@ -167,107 +174,6 @@ export default function App() {
             language={language}
           />
         )}
-
-        {/* Navigation Tabs */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5 overflow-x-auto custom-scrollbar">
-          <div className="flex items-center gap-1.5 text-xs font-semibold">
-            <button
-              id="tab-3d-btn"
-              onClick={() => setActiveTab('3d')}
-              className={`px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all ${
-                activeTab === '3d'
-                  ? 'bg-blue-600 text-white shadow-xs font-bold'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
-              }`}
-            >
-              <Box className="w-4 h-4" />
-              <span>{isJa ? '3D 積載ビュー & 操作' : '3D Load View'}</span>
-            </button>
-
-            <button
-              id="tab-cargo-btn"
-              onClick={() => setActiveTab('cargo')}
-              className={`px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all ${
-                activeTab === 'cargo'
-                  ? 'bg-blue-600 text-white shadow-xs font-bold'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
-              }`}
-            >
-              <Layers className="w-4 h-4" />
-              <span>{isJa ? '貨物・荷物設定' : 'Cargo Items'}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                activeTab === 'cargo' ? 'bg-blue-700 text-white' : 'bg-slate-100 text-blue-600'
-              }`}>
-                {totalItemCount}
-              </span>
-            </button>
-
-            <button
-              id="tab-container-btn"
-              onClick={() => setActiveTab('container')}
-              className={`px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all ${
-                activeTab === 'container'
-                  ? 'bg-blue-600 text-white shadow-xs font-bold'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
-              }`}
-            >
-              <Truck className="w-4 h-4" />
-              <span>{isJa ? 'コンテナ・編成設定' : 'Container Fleet'}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
-                activeTab === 'container' ? 'bg-blue-700 text-white' : 'bg-slate-100 text-amber-600'
-              }`}>
-                {packingResult.containers?.length || 1} {isJa ? '台' : 'units'}
-              </span>
-            </button>
-
-            <button
-              id="tab-analytics-btn"
-              onClick={() => setActiveTab('analytics')}
-              className={`px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all ${
-                activeTab === 'analytics'
-                  ? 'bg-blue-600 text-white shadow-xs font-bold'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>{isJa ? '重心・積載解析' : 'Analytics & CoG'}</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ${
-                activeTab === 'analytics' ? 'bg-blue-700 text-white' : 'bg-slate-100 text-emerald-600'
-              }`}>
-                {packingResult.metrics.volumeUtilization.toFixed(0)}%
-              </span>
-            </button>
-
-            <button
-              id="tab-manifest-btn"
-              onClick={() => setActiveTab('manifest')}
-              className={`px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all ${
-                activeTab === 'manifest'
-                  ? 'bg-blue-600 text-white shadow-xs font-bold'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
-              }`}
-            >
-              <ListOrdered className="w-4 h-4" />
-              <span>{isJa ? '積載指示マニフェスト' : 'Loading Manifest'}</span>
-            </button>
-          </div>
-
-          {/* Quick Summary Metrics Pill on Right */}
-          <div className="hidden lg:flex items-center gap-3 bg-white border border-slate-200 px-3.5 py-1.5 rounded-lg text-slate-600 shadow-xs text-xs">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              {isJa ? 'コンテナ台数:' : 'Containers:'} <strong className="text-slate-900 font-mono font-bold">{packingResult.containers?.length || 1} {isJa ? '台' : 'units'}</strong>
-            </span>
-            <span className="text-slate-300">|</span>
-            <span>
-              {isJa ? '積載完了:' : 'Packed:'} <strong className="text-blue-600 font-mono font-bold">{packingResult.packedItems.length} / {totalItemCount}</strong>
-            </span>
-            <span className="text-slate-300">|</span>
-            <span>
-              {isJa ? '積載重量:' : 'Weight:'} <strong className="text-emerald-600 font-mono font-bold">{packingResult.metrics.packedWeightKg.toLocaleString()} kg</strong>
-            </span>
-          </div>
-        </div>
 
         {/* Tab Views Content */}
         {activeTab === '3d' && (
@@ -306,7 +212,7 @@ export default function App() {
         {activeTab === 'cargo' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
             {/* Cargo Manifest Area (Narrowed for compact efficiency) */}
-            <div className="lg:col-span-5 xl:col-span-5">
+            <div className="lg:col-span-4 xl:col-span-4">
               <CargoManager
                 cargoList={cargoList}
                 onChangeCargoList={setCargoList}
@@ -321,8 +227,8 @@ export default function App() {
             </div>
 
             {/* 3D Container Packing Viewport Area (Expanded wider) */}
-            <div className="lg:col-span-7 xl:col-span-7 sticky top-4">
-              <div className="w-full h-[580px] xl:h-[640px] rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-900">
+            <div className="lg:col-span-8 xl:col-span-8 sticky top-4">
+              <div className="w-full h-[600px] xl:h-[680px] rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-900">
                 <ContainerViewer3D
                   container={selectedContainer}
                   containers={packingResult.containers}
@@ -341,8 +247,9 @@ export default function App() {
         )}
 
         {activeTab === 'container' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+            {/* Container Fleet & Selection Area (Narrowed for compact efficiency) */}
+            <div className="lg:col-span-4 xl:col-span-4">
               <ContainerSelector
                 selectedContainer={selectedContainer}
                 onSelectContainer={setSelectedContainer}
@@ -357,8 +264,10 @@ export default function App() {
                 totalPackedCount={packingResult.packedItems.length}
               />
             </div>
-            <div className="lg:col-span-4 h-full">
-              <div className="h-full min-h-[460px]">
+
+            {/* 3D Container Packing Viewport Area (Expanded wider) */}
+            <div className="lg:col-span-8 xl:col-span-8 sticky top-4">
+              <div className="w-full h-[600px] xl:h-[680px] rounded-xl overflow-hidden border border-slate-200 shadow-xs bg-slate-900">
                 <ContainerViewer3D
                   container={selectedContainer}
                   containers={packingResult.containers}

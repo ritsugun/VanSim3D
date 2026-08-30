@@ -698,7 +698,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     onClick={() => setTab(idx)}
                     className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
                       isActive
-                        ? 'bg-blue-600 text-white shadow-xs'
+                        ? 'bg-slate-900 text-white shadow-xs'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
@@ -711,7 +711,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 onClick={() => setTab('all')}
                 className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-all ${
                   currentTab === 'all'
-                    ? 'bg-purple-600 text-white shadow-xs'
+                    ? 'bg-slate-900 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
@@ -722,86 +722,37 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           )}
 
           <span className="text-slate-300 mx-1">|</span>
-          <span className="text-emerald-600 font-mono font-bold">
+          <span className="text-slate-900 font-mono font-bold">
             {activeItemsToDisplay.length} {isJa ? '個 積載' : 'Boxes'}
           </span>
         </div>
 
-        {/* Camera Preset Toolbar */}
+        {/* Top-Right Viewer Toolbar */}
         <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-lg border border-slate-200 shadow-sm text-xs">
-          <button
-            id="camera-view-iso-btn"
-            onClick={() => setCameraView('iso')}
-            title={isJa ? '斜視図 (3D Isometric)' : '3D Isometric'}
-            className={`px-2.5 py-1 rounded-md transition-colors flex items-center gap-1 font-semibold ${
-              activeCameraView === 'iso'
-                ? 'bg-blue-600 text-white shadow-2xs'
-                : 'hover:bg-slate-100 text-slate-700'
-            }`}
-          >
-            <Compass className={`w-3.5 h-3.5 ${activeCameraView === 'iso' ? 'text-white' : 'text-blue-600'}`} />
-            <span>3D</span>
-          </button>
-          <button
-            id="camera-view-top-btn"
-            onClick={() => setCameraView('top')}
-            title={isJa ? '上面図 (Top Plan)' : 'Top Plan'}
-            className={`px-2.5 py-1 rounded-md transition-colors font-medium ${
-              activeCameraView === 'top'
-                ? 'bg-blue-600 text-white font-bold shadow-2xs'
-                : 'hover:bg-slate-100 text-slate-700'
-            }`}
-          >
-            {isJa ? '天面' : 'Top'}
-          </button>
-          <button
-            id="camera-view-side-btn"
-            onClick={() => setCameraView('side')}
-            title={isJa ? '側面図 (Side View)' : 'Side View'}
-            className={`px-2.5 py-1 rounded-md transition-colors font-medium ${
-              activeCameraView === 'side'
-                ? 'bg-blue-600 text-white font-bold shadow-2xs'
-                : 'hover:bg-slate-100 text-slate-700'
-            }`}
-          >
-            {isJa ? '側面' : 'Side'}
-          </button>
-          <button
-            id="camera-view-door-btn"
-            onClick={() => setCameraView('door')}
-            title={isJa ? '扉側 (Door Entrance)' : 'Door'}
-            className={`px-2.5 py-1 rounded-md transition-colors font-medium ${
-              activeCameraView === 'door'
-                ? 'bg-amber-600 text-white font-bold shadow-2xs'
-                : 'hover:bg-slate-100 text-amber-700'
-            }`}
-          >
-            {isJa ? '扉側' : 'Door'}
-          </button>
-          <div className="w-px h-4 bg-slate-200 mx-0.5" />
           <button
             id="toggle-slice-controls-btn"
             onClick={() => setShowSliceControls(!showSliceControls)}
-            title={isJa ? '断面 & 積載シミュレーション設定' : 'Slice & Loading Simulation Controls'}
-            className={`px-2 py-1 rounded-md transition-colors flex items-center gap-1.5 font-medium ${
+            title={isJa ? '視点・断面・積載シミュレーション設定' : 'Camera Views, Slices & Loading Controls'}
+            className={`px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-1.5 font-bold ${
               showSliceControls 
-                ? 'bg-blue-600 text-white shadow-2xs' 
+                ? 'bg-slate-900 text-white shadow-2xs' 
                 : (zSlicePercent < 100 || xSlicePercent < 100 || isPlaying)
-                  ? 'bg-amber-50 text-amber-700 border border-amber-300'
-                  : 'text-slate-700 hover:bg-slate-100'
+                  ? 'bg-slate-200 text-slate-900 border border-slate-300 font-bold'
+                  : 'text-slate-800 hover:bg-slate-100'
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline text-xs">{isJa ? '操作パネル' : 'Controls'}</span>
+            <span className="text-xs">{isJa ? '操作・視点設定' : 'Controls'}</span>
             {(zSlicePercent < 100 || xSlicePercent < 100 || isPlaying) && !showSliceControls && (
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-900 animate-pulse" />
             )}
           </button>
+          <div className="w-px h-4 bg-slate-200 mx-0.5" />
           <button
             id="toggle-cog-btn"
             onClick={() => setShowCoG(!showCoG)}
             title={isJa ? '重心マーカー表示切替' : 'Toggle Center of Gravity'}
-            className={`p-1.5 rounded-md transition-colors ${showCoG ? 'bg-red-50 text-red-600 border border-red-200' : 'text-slate-500 hover:bg-slate-100'}`}
+            className={`p-1.5 rounded-md transition-colors ${showCoG ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
           >
             <Crosshair className="w-3.5 h-3.5" />
           </button>
@@ -809,9 +760,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="snapshot-3d-btn"
             onClick={captureSnapshot}
             title={isJa ? '3D画像保存 (PNG)' : 'Save 3D Snapshot'}
-            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600 transition-colors"
+            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-700 transition-colors"
           >
-            <Camera className="w-3.5 h-3.5 text-blue-600" />
+            <Camera className="w-3.5 h-3.5" />
           </button>
           <button
             id="fullscreen-3d-btn"
@@ -839,11 +790,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
             <div className="flex items-center gap-1">
               {(activeSelectedItem || hoveredItem)?.containerIndex && (
-                <span className="bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-purple-200">
+                <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-300">
                   C#{(activeSelectedItem || hoveredItem)?.containerIndex}
                 </span>
               )}
-              <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-blue-200">
+              <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-300">
                 #{(activeSelectedItem || hoveredItem)?.sequenceNumber}
               </span>
             </div>
@@ -861,7 +812,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-400 block">{isJa ? '単体重量:' : 'Weight:'}</span>
-                  <span className="font-mono font-bold text-emerald-600">
+                  <span className="font-mono font-bold text-slate-900">
                     {formatWeightCompact(target.weight, unitSystem)}
                   </span>
                 </div>
@@ -882,22 +833,22 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           })()}
 
           {(activeSelectedItem || hoveredItem)?.fragile && (
-            <div className="mt-2.5 flex items-center gap-1 bg-red-50 border border-red-200 text-red-700 px-2 py-1 rounded text-[10px] font-semibold">
-              <ShieldAlert className="w-3 h-3 text-red-600 shrink-0" />
+            <div className="mt-2.5 flex items-center gap-1 bg-slate-100 border border-slate-300 text-slate-800 px-2 py-1 rounded text-[10px] font-semibold">
+              <ShieldAlert className="w-3 h-3 text-slate-900 shrink-0" />
               <span>{isJa ? '天地無用 / 割れ物 (上に積載不可)' : 'Fragile / Do Not Stack On Top'}</span>
             </div>
           )}
         </div>
       )}
 
-      {/* Layer Slicing & Sequence Player Controls (Floating Right) */}
+      {/* Layer Slicing, Camera Views & Sequence Player Controls (Floating Right) */}
       {showSliceControls && (
         <div className="absolute top-16 right-3 pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs space-y-3.5 z-20 w-72 text-slate-700 animate-fade-in">
           {/* Header with Title, Reset & Close Button */}
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
-              {isJa ? '断面 & 積載再生コントロール' : 'Slice & Loading Controls'}
+              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-900" />
+              {isJa ? '操作・視点コントロール' : 'Controls & Camera Views'}
             </span>
             <div className="flex items-center gap-1">
               {(zSlicePercent < 100 || xSlicePercent < 100) && (
@@ -908,7 +859,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     setXSlicePercent(100);
                   }}
                   title={isJa ? '断面を全表示に戻す (100%)' : 'Reset Slices (100%)'}
-                  className="text-[10px] text-blue-600 hover:text-blue-800 font-semibold px-1 hover:underline"
+                  className="text-[10px] text-slate-800 hover:text-black font-semibold px-1 hover:underline"
                 >
                   {isJa ? '全表示' : 'Reset'}
                 </button>
@@ -924,14 +875,72 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
           </div>
 
+          {/* 1. Camera View Presets (3D, TOP, SIDE, DOOR) */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold flex items-center gap-1">
+              <Compass className="w-3 h-3 text-slate-500" />
+              {isJa ? 'カメラ視点切替' : 'Camera Views'}
+            </span>
+            <div className="grid grid-cols-4 gap-1 text-xs">
+              <button
+                id="camera-view-iso-btn"
+                onClick={() => setCameraView('iso')}
+                title={isJa ? '斜視図 (3D Isometric)' : '3D Isometric'}
+                className={`py-1.5 px-1 rounded-md transition-all flex items-center justify-center gap-1 font-bold text-center ${
+                  activeCameraView === 'iso'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <span>3D</span>
+              </button>
+              <button
+                id="camera-view-top-btn"
+                onClick={() => setCameraView('top')}
+                title={isJa ? '上面図 (Top Plan)' : 'Top Plan'}
+                className={`py-1.5 px-1 rounded-md transition-all font-bold text-center ${
+                  activeCameraView === 'top'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <span>{isJa ? '天面' : 'TOP'}</span>
+              </button>
+              <button
+                id="camera-view-side-btn"
+                onClick={() => setCameraView('side')}
+                title={isJa ? '側面図 (Side View)' : 'Side View'}
+                className={`py-1.5 px-1 rounded-md transition-all font-bold text-center ${
+                  activeCameraView === 'side'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <span>{isJa ? '側面' : 'SIDE'}</span>
+              </button>
+              <button
+                id="camera-view-door-btn"
+                onClick={() => setCameraView('door')}
+                title={isJa ? '扉側 (Door Entrance)' : 'Door'}
+                className={`py-1.5 px-1 rounded-md transition-all font-bold text-center ${
+                  activeCameraView === 'door'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <span>{isJa ? '扉側' : 'DOOR'}</span>
+              </button>
+            </div>
+          </div>
+
           {/* 1. Play Load / Loading Simulation Player */}
           <div className="bg-slate-900 text-white p-2.5 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold flex items-center gap-1 text-slate-200">
-                <Play className="w-3 h-3 text-blue-400 fill-current" />
+                <Play className="w-3 h-3 text-white fill-current" />
                 {isJa ? '積載シミュレーション' : 'Loading Sequence'}
               </span>
-              <span className="font-mono text-[11px] text-blue-400 font-bold">
+              <span className="font-mono text-[11px] text-white font-bold">
                 {currentStep} / {activeItemsToDisplay.length}
               </span>
             </div>
@@ -970,16 +979,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     }
                     setIsPlaying(!isPlaying);
                   }}
-                  className="px-2.5 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs"
+                  className="px-2.5 py-1.5 rounded bg-white hover:bg-slate-100 text-slate-900 font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs"
                 >
                   {isPlaying ? (
                     <>
-                      <Pause className="w-3.5 h-3.5" />
+                      <Pause className="w-3.5 h-3.5 text-slate-900" />
                       <span>{isJa ? '停止' : 'Pause'}</span>
                     </>
                   ) : (
                     <>
-                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <Play className="w-3.5 h-3.5 fill-current text-slate-900" />
                       <span>{isJa ? '再生' : 'Play'}</span>
                     </>
                   )}
@@ -1004,7 +1013,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   <button
                     key={speed}
                     onClick={() => setPlaybackSpeed(speed)}
-                    className={`px-1.5 py-0.5 rounded ${playbackSpeed === speed ? 'bg-blue-600 text-white' : 'hover:text-white'}`}
+                    className={`px-1.5 py-0.5 rounded ${playbackSpeed === speed ? 'bg-white text-slate-900 font-bold' : 'hover:text-white'}`}
                   >
                     {speed}x
                   </button>
@@ -1024,7 +1033,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   setIsPlaying(false);
                   setCurrentStep(Number(e.target.value));
                 }}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-white"
               />
             </div>
           </div>
@@ -1034,7 +1043,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             <div>
               <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
                 <span className="flex items-center gap-1 font-medium">
-                  <Layers className="w-3 h-3 text-blue-600" />
+                  <Layers className="w-3 h-3 text-slate-700" />
                   {isJa ? '高さ断面 (Z)' : 'Height Slice (Z)'}
                 </span>
                 <span className="font-mono text-slate-800 font-bold">{zSlicePercent}%</span>
@@ -1046,14 +1055,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 max="100"
                 value={zSlicePercent}
                 onChange={(e) => setZSlicePercent(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
                 <span className="flex items-center gap-1 font-medium">
-                  <SlidersHorizontal className="w-3 h-3 text-emerald-600" />
+                  <SlidersHorizontal className="w-3 h-3 text-slate-700" />
                   {isJa ? '奥行断面 (X)' : 'Depth Slice (X)'}
                 </span>
                 <span className="font-mono text-slate-800 font-bold">{xSlicePercent}%</span>
@@ -1065,7 +1074,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 max="100"
                 value={xSlicePercent}
                 onChange={(e) => setXSlicePercent(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
               />
             </div>
           </div>
@@ -1079,7 +1088,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               <button
                 onClick={() => setColorMode('cargo')}
                 className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                  colorMode === 'cargo' ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  colorMode === 'cargo' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
                 {isJa ? '種別' : 'Cargo'}
@@ -1087,7 +1096,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               <button
                 onClick={() => setColorMode('weight')}
                 className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                  colorMode === 'weight' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  colorMode === 'weight' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
                 {isJa ? '重量' : 'Weight'}
@@ -1095,7 +1104,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               <button
                 onClick={() => setColorMode('sequence')}
                 className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                  colorMode === 'sequence' ? 'bg-purple-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  colorMode === 'sequence' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
                 {isJa ? '順序' : 'Seq'}

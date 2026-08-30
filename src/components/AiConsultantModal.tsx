@@ -114,8 +114,8 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center">
-              <Sparkles className="w-5 h-5 text-indigo-600" />
+            <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-300 flex items-center justify-center text-slate-900">
+              <Sparkles className="w-5 h-5 text-slate-800" />
             </div>
             <div>
               <h2 className="text-lg font-bold text-slate-900">
@@ -137,7 +137,7 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
         {/* Action Trigger Button if not generated yet */}
         {!aiData && !loading && (
           <div className="text-center py-10 space-y-4">
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center mx-auto text-indigo-600">
+            <div className="w-16 h-16 rounded-2xl bg-slate-100 border border-slate-300 flex items-center justify-center mx-auto text-slate-800">
               <Sparkles className="w-8 h-8 animate-pulse" />
             </div>
             <div className="max-w-md mx-auto">
@@ -152,7 +152,7 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
             </div>
             <button
               onClick={generateAiAudit}
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-xs transition-all active:scale-95 flex items-center gap-2 mx-auto"
+              className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl shadow-xs transition-all active:scale-95 flex items-center gap-2 mx-auto"
             >
               <Sparkles className="w-4 h-4" />
               <span>{isJa ? 'AI監査レポートを生成' : 'Generate AI Audit Report'}</span>
@@ -163,7 +163,7 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
         {/* Loading Spinner */}
         {loading && (
           <div className="text-center py-12 space-y-3">
-            <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+            <RefreshCw className="w-8 h-8 text-slate-800 animate-spin mx-auto" />
             <p className="text-xs text-slate-600 font-medium">
               {isJa ? 'Gemini AIがコンテナの物理特性と貨物配置を解析中...' : 'Analyzing container physics, cargo distribution, and transit stability...'}
             </p>
@@ -174,9 +174,9 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
         {aiData && !loading && (
           <div className="space-y-4 text-xs animate-fade-in">
             {/* Score & Summary Banner */}
-            <div className="bg-indigo-50/70 border border-indigo-100 rounded-xl p-4 flex items-center justify-between gap-4">
+            <div className="bg-slate-50 border border-slate-300 rounded-xl p-4 flex items-center justify-between gap-4">
               <div>
-                <span className="text-[10px] uppercase font-bold text-indigo-700 tracking-wider block mb-0.5">
+                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-0.5">
                   {isJa ? '積載安全性・効率性スコア' : 'Safety & Efficiency Rating'}
                 </span>
                 <h3 className="font-bold text-base text-slate-900">{aiData.scoreTitle}</h3>
@@ -184,8 +184,8 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
                   {aiData.summary}
                 </p>
               </div>
-              <div className="text-center shrink-0 bg-white border border-indigo-200 px-4 py-3 rounded-xl shadow-xs">
-                <span className="font-mono text-3xl font-extrabold text-blue-600 block">
+              <div className="text-center shrink-0 bg-white border border-slate-300 px-4 py-3 rounded-xl shadow-xs">
+                <span className="font-mono text-3xl font-extrabold text-slate-900 block">
                   {aiData.score}
                 </span>
                 <span className="text-[10px] text-slate-500 uppercase font-semibold">/ 100 PTS</span>
@@ -195,8 +195,8 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
             {/* Stability & Dunnage Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1.5">
-                <h4 className="font-bold text-emerald-700 flex items-center gap-1.5 text-xs">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <h4 className="font-bold text-slate-900 flex items-center gap-1.5 text-xs">
+                  <ShieldCheck className="w-4 h-4 text-slate-700" />
                   {isJa ? '輸送時安定性・重心評価' : 'Transit Stability Analysis'}
                 </h4>
                 <p className="text-slate-600 text-[11px] leading-relaxed">
@@ -205,8 +205,8 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1.5">
-                <h4 className="font-bold text-amber-700 flex items-center gap-1.5 text-xs">
-                  <Box className="w-4 h-4 text-amber-600" />
+                <h4 className="font-bold text-slate-900 flex items-center gap-1.5 text-xs">
+                  <Box className="w-4 h-4 text-slate-700" />
                   {isJa ? 'ダンネージ（緩衝材）・固縛指示' : 'Dunnage & Lashing Guidance'}
                 </h4>
                 <p className="text-slate-600 text-[11px] leading-relaxed">
@@ -217,14 +217,14 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
 
             {/* Actionable Tips */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
-              <h4 className="font-bold text-blue-700 flex items-center gap-1.5 text-xs">
-                <Lightbulb className="w-4 h-4 text-blue-600" />
+              <h4 className="font-bold text-slate-900 flex items-center gap-1.5 text-xs">
+                <Lightbulb className="w-4 h-4 text-slate-700" />
                 {isJa ? 'プロ物流エンジニアの改善推奨事項' : 'Operational Improvement Recommendations'}
               </h4>
               <div className="space-y-2">
                 {aiData.actionableTips?.map((tip, idx) => (
                   <div key={idx} className="flex items-start gap-2 text-[11px] text-slate-700">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+                    <CheckCircle2 className="w-3.5 h-3.5 text-slate-900 shrink-0 mt-0.5" />
                     <span>{tip}</span>
                   </div>
                 ))}
@@ -235,14 +235,14 @@ export const AiConsultantModal: React.FC<AiConsultantModalProps> = ({
             <div className="flex items-center justify-between pt-3 border-t border-slate-100">
               <button
                 onClick={generateAiAudit}
-                className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs flex items-center gap-1.5 transition-colors"
+                className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs flex items-center gap-1.5 transition-colors border border-slate-300"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
+                <RefreshCw className="w-3.5 h-3.5 text-slate-700" />
                 <span>{isJa ? '再診断を実行' : 'Re-Run Audit'}</span>
               </button>
               <button
                 onClick={onClose}
-                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-colors"
+                className="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-colors"
               >
                 {isJa ? '閉じる' : 'Close'}
               </button>

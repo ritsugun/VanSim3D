@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { CargoItem, Container, UnitSystem, Language } from '../types';
 import { SAMPLE_CARGO_PRESETS, CargoPreset, SAMPLE_CSV_TEMPLATE } from '../data/presets';
 import { 
   Plus, Trash2, Upload, Download, Sparkles, 
   ShieldAlert, Check, FileSpreadsheet, FileDown,
-  Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw
+  Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
 
@@ -120,6 +120,34 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   // Bulk enable / disable all
   const handleToggleAll = (enable: boolean) => {
     onChangeCargoList(cargoList.map(c => ({ ...c, enabled: enable })));
+  };
+
+  // Consolidate & Aggregate identical cargo items (same SKU/name, dimensions, weight, fragile & rotation rules)
+  const handleConsolidateDuplicates = () => {
+    const map = new Map<string, CargoItem>();
+    let mergedCount = 0;
+
+    cargoList.forEach(item => {
+      const key = `${item.name.trim().toLowerCase()}_${item.width}_${item.height}_${item.length}_${item.weight}_${item.allowYaw !== false}_${Boolean(item.fragile)}`;
+      if (map.has(key)) {
+        const existing = map.get(key)!;
+        existing.quantity += item.quantity;
+        if (item.enabled !== false) existing.enabled = true;
+        mergedCount++;
+      } else {
+        map.set(key, { ...item });
+      }
+    });
+
+    if (mergedCount > 0) {
+      const consolidated = Array.from(map.values());
+      onChangeCargoList(consolidated);
+      setImportNotification(isJa ? `重複する ${mergedCount} 件の貨物を数量集約しました！` : `Consolidated ${mergedCount} duplicate items into single entries!`);
+      setTimeout(() => setImportNotification(null), 3000);
+    } else {
+      setImportNotification(isJa ? '重複する品目はありません' : 'No duplicate items found');
+      setTimeout(() => setImportNotification(null), 2500);
+    }
   };
 
   // Load Preset
@@ -287,6 +315,17 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const isAllSelected = totalCount > 0 && activeCount === totalCount;
   const isNoneSelected = activeCount === 0;
 
+  // Check if duplicate items exist
+  const hasDuplicateItems = useMemo(() => {
+    const seen = new Set<string>();
+    for (const item of cargoList) {
+      const key = `${item.name.trim().toLowerCase()}_${item.width}_${item.height}_${item.length}_${item.weight}_${item.allowYaw !== false}_${Boolean(item.fragile)}`;
+      if (seen.has(key)) return true;
+      seen.add(key);
+    }
+    return false;
+  }, [cargoList]);
+
   const totalQuantity = cargoList.reduce((sum, c) => sum + (c.quantity || 0), 0);
   const activeQuantity = activeCargoList.reduce((sum, c) => sum + (c.quantity || 0), 0);
   
@@ -295,16 +334,16 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const containerVolCbm = (container.length * container.width * container.height) / 1_000_000_000;
 
   return (
-    <div id="cargo-manager-root" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-slate-800 flex flex-col h-full">
+    <div id="cargo-manager-root" className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs text-slate-800 flex flex-col h-full">
       {/* Header with Title & Action Buttons */}
-      <div className="flex items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100 flex-wrap">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+      <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-slate-100 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h2 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0" />
             {isJa ? '積載貨物リスト (Cargo Manifest)' : 'Cargo Items'}
           </h2>
           <div className="flex items-center gap-1.5 text-xs">
-            <span className={`px-2 py-0.5 rounded-full border font-semibold ${
+            <span className={`px-2 py-0.5 rounded-full border font-semibold text-[11px] ${
               hasDisabledItems 
                 ? 'bg-amber-50 text-amber-800 border-amber-200' 
                 : 'bg-blue-50 text-blue-700 border-blue-200'
@@ -316,7 +355,21 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap text-xs">
+        <div className="flex items-center gap-1.5 flex-wrap text-xs">
+          {/* Duplicate consolidation button if duplicates exist */}
+          {hasDuplicateItems && (
+            <button
+              type="button"
+              id="consolidate-duplicates-btn"
+              onClick={handleConsolidateDuplicates}
+              title={isJa ? '同一の品名・寸法・特性を持つ貨物を1行にまとめて数量集約' : 'Aggregate duplicate cargo entries into single rows'}
+              className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold flex items-center gap-1 transition-colors animate-pulse"
+            >
+              <Layers className="w-3.5 h-3.5 text-amber-600" />
+              <span>{isJa ? '重複集約' : 'Aggregate'}</span>
+            </button>
+          )}
+
           {/* Quick Select All / Deselect All */}
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
             <button
@@ -325,7 +378,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               onClick={() => handleToggleAll(true)}
               disabled={isAllSelected}
               title={isJa ? 'すべての貨物を積載対象にする' : 'Select all items'}
-              className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
+              className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
                 isAllSelected 
                   ? 'text-slate-400 cursor-not-allowed' 
                   : 'bg-white text-blue-700 shadow-2xs hover:bg-blue-50'
@@ -340,7 +393,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               onClick={() => handleToggleAll(false)}
               disabled={isNoneSelected}
               title={isJa ? 'すべての貨物の積載を解除する' : 'Deselect all items'}
-              className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
+              className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
                 isNoneSelected 
                   ? 'text-slate-400 cursor-not-allowed' 
                   : 'bg-white text-slate-700 shadow-2xs hover:bg-slate-50'
@@ -354,29 +407,29 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           <button
             id="open-presets-btn"
             onClick={() => setShowPresetsModal(true)}
-            className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold flex items-center gap-1.5 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold flex items-center gap-1 transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            <span>{isJa ? 'サンプル混載プリセット' : 'Load Preset'}</span>
+            <span>{isJa ? 'プリセット' : 'Preset'}</span>
           </button>
 
           <button
             id="download-template-btn"
             onClick={handleDownloadTemplate}
             title={isJa ? '指定フォーマットのCSV雛形をダウンロード' : 'Download CSV Template'}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1.5 transition-colors"
+            className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors"
           >
             <FileDown className="w-3.5 h-3.5 text-slate-600" />
-            <span>{isJa ? 'CSV雛形' : 'Template'}</span>
+            <span>{isJa ? '雛形' : 'Template'}</span>
           </button>
 
           <label 
             id="import-csv-label" 
-            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer font-medium flex items-center gap-1.5 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer font-medium flex items-center gap-1 transition-colors"
             title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,個数,横回転許可,カラー,割れ物,積載対象)' : 'Import from CSV'}
           >
             <Upload className="w-3.5 h-3.5 text-emerald-600" />
-            <span>{isJa ? 'CSV取込' : 'Import'}</span>
+            <span>{isJa ? '取込' : 'Import'}</span>
             <input type="file" accept=".csv" onChange={handleImportCsv} className="hidden" />
           </label>
 
@@ -384,19 +437,19 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             id="export-csv-btn"
             onClick={handleExportCsv}
             title={isJa ? '貨物リストをCSV出力' : 'Export CSV'}
-            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1.5 transition-colors"
+            className="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors"
           >
             <Download className="w-3.5 h-3.5 text-blue-600" />
-            <span>{isJa ? 'CSV保存' : 'Export'}</span>
+            <span>{isJa ? '保存' : 'Export'}</span>
           </button>
 
           <button
             id="add-new-cargo-btn"
             onClick={() => setIsAddingNew(!isAddingNew)}
-            className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95"
+            className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95"
           >
-            <Plus className="w-4 h-4" />
-            <span>{isJa ? '荷物を追加' : 'Add Item'}</span>
+            <Plus className="w-3.5 h-3.5" />
+            <span>{isJa ? '追加' : 'Add'}</span>
           </button>
         </div>
       </div>

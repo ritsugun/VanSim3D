@@ -195,16 +195,16 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
     <div id="packing-analytics-root" className="space-y-4">
       {/* Fleet Multi-Container Summary Card if multiple containers exist */}
       {hasMultipleContainers && overallMetrics && (
-        <div className="bg-linear-to-r from-blue-50/80 to-purple-50/80 border border-blue-200 rounded-xl p-4 shadow-xs text-slate-800">
-          <div className="flex items-center justify-between gap-3 mb-3 pb-2.5 border-b border-blue-200/60 flex-wrap">
+        <div className="bg-slate-50 border border-slate-300 rounded-xl p-4 shadow-xs text-slate-800">
+          <div className="flex items-center justify-between gap-3 mb-3 pb-2.5 border-b border-slate-200 flex-wrap">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+              <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold">
                 <Truck className="w-4 h-4" />
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                   {isJa ? 'マルチコンテナ輸送編成サマリー' : 'Fleet Multi-Container Summary'}
-                  <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded font-mono font-bold">
+                  <span className="bg-slate-900 text-white text-[10px] px-2 py-0.5 rounded font-mono font-bold">
                     {overallMetrics.totalContainersCount} {isJa ? '台 編成' : 'Units'}
                   </span>
                 </h3>
@@ -217,13 +217,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
             </div>
 
             <div className="flex items-center gap-3 text-xs">
-              <div className="bg-white/80 backdrop-blur-xs px-3 py-1.5 rounded-lg border border-blue-200/80">
-                <span className="text-slate-400 block text-[10px] uppercase font-semibold">{isJa ? '全台平均容積積載率' : 'Fleet Avg Volume'}</span>
-                <span className="font-mono font-bold text-blue-700 text-sm">{overallMetrics.overallVolumeUtilization.toFixed(1)}%</span>
+              <div className="bg-white px-3 py-1.5 rounded-lg border border-slate-300">
+                <span className="text-slate-500 block text-[10px] uppercase font-semibold">{isJa ? '全台平均容積積載率' : 'Fleet Avg Volume'}</span>
+                <span className="font-mono font-bold text-slate-900 text-sm">{overallMetrics.overallVolumeUtilization.toFixed(1)}%</span>
               </div>
-              <div className="bg-white/80 backdrop-blur-xs px-3 py-1.5 rounded-lg border border-blue-200/80">
-                <span className="text-slate-400 block text-[10px] uppercase font-semibold">{isJa ? '全台総輸送コスト' : 'Total Fleet Cost'}</span>
-                <span className="font-mono font-bold text-purple-700 text-sm">${overallMetrics.totalCostEstimate.toLocaleString()}</span>
+              <div className="bg-white px-3 py-1.5 rounded-lg border border-slate-300">
+                <span className="text-slate-500 block text-[10px] uppercase font-semibold">{isJa ? '全台総輸送コスト' : 'Total Fleet Cost'}</span>
+                <span className="font-mono font-bold text-slate-900 text-sm">${overallMetrics.totalCostEstimate.toLocaleString()}</span>
               </div>
             </div>
           </div>
@@ -238,13 +238,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                   onClick={() => onSelectContainerIndex && onSelectContainerIndex(idx)}
                   className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
                     isSelected
-                      ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                      : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                      : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-800'
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs font-mono ${
-                      isSelected ? 'bg-white text-blue-600' : 'bg-blue-50 text-blue-700'
+                      isSelected ? 'bg-white text-slate-900' : 'bg-slate-100 text-slate-900'
                     }`}>
                       #{idx + 1}
                     </span>
@@ -252,17 +252,17 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                       <span className="font-bold text-xs block">
                         {isJa ? `コンテナ #${idx + 1}` : `Container #${idx + 1}`}
                       </span>
-                      <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                      <span className={`text-[10px] ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
                         {cLoad.packedItems.length} {isJa ? '個積載' : 'boxes'} • {formatWeight(cLoad.metrics.packedWeightKg, unitSystem)}
                       </span>
                     </div>
                   </div>
 
                   <div className="text-right">
-                    <span className={`font-mono font-bold text-xs block ${isSelected ? 'text-white' : 'text-blue-600'}`}>
+                    <span className={`font-mono font-bold text-xs block ${isSelected ? 'text-white' : 'text-slate-900'}`}>
                       {cLoad.metrics.volumeUtilization.toFixed(1)}%
                     </span>
-                    <span className={`text-[9px] uppercase ${isSelected ? 'text-blue-200' : 'text-slate-400'}`}>
+                    <span className={`text-[9px] uppercase ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
                       {isJa ? '容積率' : 'Vol'}
                     </span>
                   </div>
@@ -275,20 +275,20 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
 
       {/* Unplaced Items Warning Alert if any */}
       {unplacedItems.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-900 text-xs shadow-xs">
-          <div className="flex items-center gap-2 font-bold text-amber-800 mb-1.5">
-            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+        <div className="bg-slate-100 border border-slate-300 rounded-xl p-4 text-slate-900 text-xs shadow-xs">
+          <div className="flex items-center gap-2 font-bold text-slate-900 mb-1.5">
+            <AlertTriangle className="w-4 h-4 text-slate-700 shrink-0" />
             <span>
               {isJa 
                 ? `積載上限により未積載の貨物が ${metrics.unplacedCount} 個あります` 
                 : `${metrics.unplacedCount} items could not be packed into available containers`}
             </span>
           </div>
-          <div className="space-y-1 pl-6 text-[11px] text-amber-800/90">
+          <div className="space-y-1 pl-6 text-[11px] text-slate-700">
             {unplacedItems.map((u, idx) => (
               <div key={idx} className="flex items-center justify-between">
                 <span>• {u.name} ({u.sku}) × {u.count} {isJa ? '個' : 'pcs'}</span>
-                <span className="font-mono font-semibold text-amber-700">
+                <span className="font-mono font-semibold text-slate-900">
                   {u.reason === 'exceeds_weight' ? (isJa ? '重量制限超過' : 'Exceeds Weight Limit') : (isJa ? '空間不足' : 'Spatial Overflow')}
                 </span>
               </div>
@@ -303,16 +303,16 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
-              <Gauge className="w-4 h-4 text-blue-600" />
+              <Gauge className="w-4 h-4 text-slate-800" />
               {isJa ? '容積積載率 (CBM)' : 'Volume Utilization'}
             </span>
-            <span className="font-bold font-mono text-base text-blue-600">
+            <span className="font-bold font-mono text-base text-slate-900">
               {metrics.volumeUtilization.toFixed(1)}%
             </span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2.5">
             <div 
-              className="bg-blue-600 h-full transition-all duration-500 rounded-full"
+              className="bg-slate-900 h-full transition-all duration-500 rounded-full"
               style={{ width: `${Math.min(100, metrics.volumeUtilization)}%` }}
             />
           </div>
@@ -326,16 +326,16 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
-              <Scale className="w-4 h-4 text-emerald-600" />
+              <Scale className="w-4 h-4 text-slate-800" />
               {isJa ? '重量積載率 (Payload)' : 'Weight Utilization'}
             </span>
-            <span className={`font-bold font-mono text-base ${metrics.weightUtilization > 95 ? 'text-red-600' : 'text-emerald-600'}`}>
+            <span className="font-bold font-mono text-base text-slate-900">
               {metrics.weightUtilization.toFixed(1)}%
             </span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2.5">
             <div 
-              className={`h-full transition-all duration-500 rounded-full ${metrics.weightUtilization > 95 ? 'bg-red-500' : 'bg-emerald-500'}`}
+              className="h-full transition-all duration-500 rounded-full bg-slate-900"
               style={{ width: `${Math.min(100, metrics.weightUtilization)}%` }}
             />
           </div>
@@ -349,10 +349,10 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
-              <PackageCheck className="w-4 h-4 text-amber-500" />
+              <PackageCheck className="w-4 h-4 text-slate-800" />
               {isJa ? '積載完了個数' : 'Cargo Packed'}
             </span>
-            <span className="font-mono text-amber-600 font-bold text-base">
+            <span className="font-mono text-slate-900 font-bold text-base">
               {metrics.packedCount} / {metrics.totalItemCount}
             </span>
           </div>
@@ -363,7 +363,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           </p>
           <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-[10px] text-slate-400">
             <span>{isJa ? 'アルゴリズム計算時間' : 'Calc Time'}:</span>
-            <span className="font-mono text-blue-600 font-bold">{metrics.calculationTimeMs} ms</span>
+            <span className="font-mono text-slate-800 font-bold">{metrics.calculationTimeMs} ms</span>
           </div>
         </div>
 
@@ -371,10 +371,10 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
-              <DollarSign className="w-4 h-4 text-purple-600" />
+              <DollarSign className="w-4 h-4 text-slate-800" />
               {isJa ? '概算輸送コスト' : 'Estimated Cost'}
             </span>
-            <span className="font-mono text-purple-600 font-bold text-base">
+            <span className="font-mono text-slate-900 font-bold text-base">
               ${((container.costEstimate || 2000) * metrics.containersNeeded).toLocaleString()}
             </span>
           </div>
@@ -385,7 +385,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           </p>
           <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-[10px] text-slate-400">
             <span>{isJa ? '必要コンテナ数' : 'Units Required'}:</span>
-            <span className="font-mono text-purple-600 font-bold">{metrics.containersNeeded} 台</span>
+            <span className="font-mono text-slate-900 font-bold">{metrics.containersNeeded} 台</span>
           </div>
         </div>
       </div>
@@ -396,15 +396,11 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs">
           <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
             <h3 className="font-bold text-slate-900 flex items-center gap-2">
-              <Crosshair className="w-4 h-4 text-red-500" />
+              <Crosshair className="w-4 h-4 text-slate-900" />
               {isJa ? '重心位置・バランス解析 (Center of Gravity)' : 'Center of Gravity (CoG) Stability'}
             </h3>
-            <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${
-              isOverallBalanced 
-                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                : 'bg-amber-50 text-amber-700 border border-amber-200'
-            }`}>
-              {isOverallBalanced ? <CheckCircle2 className="w-3 h-3 text-emerald-600" /> : <AlertTriangle className="w-3 h-3 text-amber-600" />}
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-slate-100 text-slate-800 border border-slate-300">
+              {isOverallBalanced ? <CheckCircle2 className="w-3 h-3 text-slate-700" /> : <AlertTriangle className="w-3 h-3 text-slate-700" />}
               {isOverallBalanced ? (isJa ? '重心安定 (理想的)' : 'Balanced & Safe') : (isJa ? '偏荷重注意' : 'Off-Center Caution')}
             </span>
           </div>
@@ -412,8 +408,8 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
             {/* Visual 2D Container Top-Down Crosshair Map */}
             <div className="relative w-full h-32 bg-slate-50 border border-slate-200 rounded-lg overflow-hidden flex items-center justify-center">
-              {/* Safe Green Zone Center */}
-              <div className="absolute w-1/4 h-1/3 bg-emerald-500/10 border border-emerald-500/25 rounded" />
+              {/* Safe Zone Center */}
+              <div className="absolute w-1/4 h-1/3 bg-slate-200/50 border border-slate-300 rounded" />
 
               {/* Grid Lines */}
               <div className="absolute inset-x-0 top-1/2 h-px bg-slate-200" />
@@ -421,19 +417,19 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
 
               {/* Labels */}
               <span className="absolute top-1 left-2 text-[9px] text-slate-400 uppercase font-semibold">{isJa ? '奥 (Back)' : 'Back (X=0)'}</span>
-              <span className="absolute bottom-1 right-2 text-[9px] text-amber-600 uppercase font-semibold">{isJa ? '扉側 (Door)' : 'Door (X=L)'}</span>
+              <span className="absolute bottom-1 right-2 text-[9px] text-slate-600 uppercase font-semibold">{isJa ? '扉側 (Door)' : 'Door (X=L)'}</span>
               <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-semibold">{isJa ? '左' : 'L'}</span>
               <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-semibold">{isJa ? '右' : 'R'}</span>
 
-              {/* CoG Red Target Crosshair Marker */}
+              {/* CoG Crosshair Marker */}
               <div 
-                className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-red-500 bg-red-500/30 shadow-md flex items-center justify-center transition-all duration-300"
+                className="absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 border-slate-900 bg-slate-900/30 shadow-md flex items-center justify-center transition-all duration-300"
                 style={{
                   left: `${Math.max(5, Math.min(95, crosshairLeft))}%`,
                   top: `${Math.max(5, Math.min(95, crosshairTop))}%`
                 }}
               >
-                <div className="w-1.5 h-1.5 bg-red-600 rounded-full" />
+                <div className="w-1.5 h-1.5 bg-slate-900 rounded-full" />
               </div>
             </div>
 
@@ -455,7 +451,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">{isJa ? '重心高さ (Z):' : 'CoG Height (Z):'}</span>
-                <span className="font-mono font-bold text-emerald-600">
+                <span className="font-mono font-bold text-slate-900">
                   {formatLength(metrics.centerOfGravity.z, unitSystem)}
                 </span>
               </div>
@@ -467,7 +463,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
             <h3 className="font-bold text-slate-900 flex items-center gap-2">
-              <Truck className="w-4 h-4 text-blue-600" />
+              <Truck className="w-4 h-4 text-slate-800" />
               {isJa ? '陸上輸送 軸重配分推定 (Axle Load)' : 'Road Trailer Axle Load Estimation'}
             </h3>
             <span className="text-slate-400 text-[10px]">
@@ -480,13 +476,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-600 font-medium">{isJa ? '前軸 / 牽引側 (Front / Kingpin):' : 'Front Axle / Kingpin:'}</span>
-                <span className="font-mono font-bold text-blue-600">
+                <span className="font-mono font-bold text-slate-900">
                   {metrics.axleDistribution.frontAxlePercent.toFixed(1)}% ({formatWeight(metrics.axleDistribution.frontAxleKg, unitSystem)})
                 </span>
               </div>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                 <div 
-                  className="bg-blue-600 h-full rounded-full transition-all duration-500" 
+                  className="bg-slate-900 h-full rounded-full transition-all duration-500" 
                   style={{ width: `${metrics.axleDistribution.frontAxlePercent}%` }} 
                 />
               </div>
@@ -496,13 +492,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
             <div>
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-600 font-medium">{isJa ? '後軸 / タンデム軸 (Rear Tandem):' : 'Rear Axle / Tandem:'}</span>
-                <span className="font-mono font-bold text-indigo-600">
+                <span className="font-mono font-bold text-slate-900">
                   {metrics.axleDistribution.rearAxlePercent.toFixed(1)}% ({formatWeight(metrics.axleDistribution.rearAxleKg, unitSystem)})
                 </span>
               </div>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                 <div 
-                  className="bg-indigo-600 h-full rounded-full transition-all duration-500" 
+                  className="bg-slate-700 h-full rounded-full transition-all duration-500" 
                   style={{ width: `${metrics.axleDistribution.rearAxlePercent}%` }} 
                 />
               </div>
@@ -522,7 +518,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 flex-wrap">
           <div>
             <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-              <Box className="w-4 h-4 text-blue-600" />
+              <Box className="w-4 h-4 text-slate-800" />
               {isJa ? '各コンテナ別 貨物積載数・内訳明細' : 'Cargo Breakdown & Quantity per Container'}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -540,7 +536,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                 onClick={() => setSelectedBreakdownTab('all')}
                 className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
                   selectedBreakdownTab === 'all'
-                    ? 'bg-purple-600 text-white shadow-xs'
+                    ? 'bg-slate-900 text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -554,7 +550,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                   onClick={() => setSelectedBreakdownTab(idx)}
                   className={`px-2.5 py-1 rounded-md transition-all font-mono ${
                     selectedBreakdownTab === idx
-                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      ? 'bg-slate-900 text-white shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -577,11 +573,11 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                     <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '寸法 (mm)' : 'Dimensions (mm)'}</th>
                     <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単重 (kg)' : 'Unit Wt (kg)'}</th>
                     {breakdownByContainer.map((b, idx) => (
-                      <th key={idx} className="py-2.5 px-3.5 text-center bg-blue-50/50 text-blue-800 whitespace-nowrap font-mono">
+                      <th key={idx} className="py-2.5 px-3.5 text-center bg-slate-100 text-slate-800 whitespace-nowrap font-mono">
                         {isJa ? `コンテナ #${idx + 1}` : `Container #${idx + 1}`}
                       </th>
                     ))}
-                    <th className="py-2.5 px-3.5 text-center whitespace-nowrap font-mono bg-emerald-50 text-emerald-800">
+                    <th className="py-2.5 px-3.5 text-center whitespace-nowrap font-mono bg-slate-100 text-slate-900">
                       {isJa ? '合計積載数' : 'Total Packed'}
                     </th>
                     <th className="py-2.5 px-3.5 text-center whitespace-nowrap font-mono bg-slate-100 text-slate-700">
@@ -605,7 +601,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                               <span className="font-mono text-[10px] text-slate-400">{row.sku}</span>
                             </div>
                             {row.fragile && (
-                              <span className="bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.2 rounded font-semibold ml-1">
+                              <span className="bg-slate-100 text-slate-800 border border-slate-300 text-[9px] px-1.5 py-0.2 rounded font-semibold ml-1">
                                 {isJa ? '割れ物' : 'Fragile'}
                               </span>
                             )}
@@ -620,7 +616,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                         {row.countsByContainer.map((cnt, cIdx) => (
                           <td key={cIdx} className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap">
                             {cnt > 0 ? (
-                              <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-xs">
+                              <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-slate-900 text-white font-bold text-xs">
                                 {cnt} {isJa ? '個' : 'pcs'}
                               </span>
                             ) : (
@@ -628,18 +624,18 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                             )}
                           </td>
                         ))}
-                        <td className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap bg-emerald-50/50">
-                          <span className="font-bold text-emerald-700 text-xs">
+                        <td className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap bg-slate-50">
+                          <span className="font-bold text-slate-900 text-xs">
                             {row.totalPacked} {isJa ? '個' : 'pcs'}
                           </span>
                         </td>
                         <td className="py-2.5 px-3.5 text-center font-mono whitespace-nowrap bg-slate-50">
                           {row.unplacedCount > 0 ? (
-                            <span className="font-bold text-red-600 text-xs bg-red-50 px-2 py-0.5 rounded">
+                            <span className="font-bold text-slate-900 text-xs bg-slate-200 px-2 py-0.5 rounded">
                               {row.unplacedCount} {isJa ? '個' : 'pcs'}
                             </span>
                           ) : (
-                            <span className="text-emerald-600 font-semibold text-xs flex items-center justify-center gap-0.5">
+                            <span className="text-slate-800 font-semibold text-xs flex items-center justify-center gap-0.5">
                               <Check className="w-3 h-3" />
                               {isJa ? '完了' : '0'}
                             </span>
@@ -658,7 +654,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                 <div key={b.containerIndex} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2 flex-wrap gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-md bg-blue-600 text-white font-mono font-bold flex items-center justify-center text-xs">
+                      <span className="w-6 h-6 rounded-md bg-slate-900 text-white font-mono font-bold flex items-center justify-center text-xs">
                         #{idx + 1}
                       </span>
                       <div>
@@ -672,10 +668,10 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                     </div>
 
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="bg-blue-100 text-blue-800 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                      <span className="bg-slate-100 text-slate-900 border border-slate-300 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
                         {isJa ? '容積率' : 'Vol'}: {b.volumeUtil.toFixed(1)}%
                       </span>
-                      <span className="bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
+                      <span className="bg-slate-100 text-slate-900 border border-slate-300 font-mono font-bold px-2 py-0.5 rounded text-[11px]">
                         {formatWeight(b.totalWeightKg, unitSystem)}
                       </span>
                     </div>
@@ -698,7 +694,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                         </div>
 
                         <div className="text-right shrink-0 pl-2">
-                          <span className="inline-block bg-blue-50 border border-blue-200 text-blue-700 font-mono font-bold text-xs px-2 py-0.5 rounded">
+                          <span className="inline-block bg-slate-100 border border-slate-300 text-slate-900 font-mono font-bold text-xs px-2 py-0.5 rounded">
                             {item.count} {isJa ? '個' : 'pcs'}
                           </span>
                           <span className="text-[10px] text-slate-400 block font-mono mt-0.5">
@@ -727,9 +723,9 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               return (
                 <div className="space-y-3">
                   {/* Container Quick Specs Pill Bar */}
-                  <div className="flex items-center justify-between bg-blue-50/70 border border-blue-200 rounded-xl p-3 text-xs flex-wrap gap-2">
+                  <div className="flex items-center justify-between bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs flex-wrap gap-2">
                     <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-lg bg-blue-600 text-white font-mono font-bold flex items-center justify-center text-xs">
+                      <span className="w-7 h-7 rounded-lg bg-slate-900 text-white font-mono font-bold flex items-center justify-center text-xs">
                         #{currentLoad.containerIndex}
                       </span>
                       <div>
@@ -748,15 +744,15 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                     </div>
 
                     <div className="flex items-center gap-3 text-xs">
-                      <div className="bg-white px-2.5 py-1 rounded-lg border border-blue-200">
+                      <div className="bg-white px-2.5 py-1 rounded-lg border border-slate-300">
                         <span className="text-slate-400 text-[10px] block uppercase font-semibold">{isJa ? '積載重量' : 'Packed Weight'}</span>
-                        <span className="font-mono font-bold text-emerald-700">
+                        <span className="font-mono font-bold text-slate-900">
                           {formatWeight(currentLoad.totalWeightKg, unitSystem)} / {formatWeight(currentLoad.container.maxWeight, unitSystem)}
                         </span>
                       </div>
-                      <div className="bg-white px-2.5 py-1 rounded-lg border border-blue-200">
+                      <div className="bg-white px-2.5 py-1 rounded-lg border border-slate-300">
                         <span className="text-slate-400 text-[10px] block uppercase font-semibold">{isJa ? '容積充填率' : 'Volume Util'}</span>
-                        <span className="font-mono font-bold text-blue-700">
+                        <span className="font-mono font-bold text-slate-900">
                           {currentLoad.volumeUtil.toFixed(1)}% ({formatVolume(currentLoad.totalVolumeCbm, unitSystem, 2)})
                         </span>
                       </div>
@@ -772,7 +768,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                           <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '貨物名 / 管理SKU' : 'Cargo Item & SKU'}</th>
                           <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体外寸 (L×W×H mm)' : 'Unit Dimensions (mm)'}</th>
                           <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体重量' : 'Unit Weight'}</th>
-                          <th className="py-2.5 px-3.5 text-center whitespace-nowrap bg-blue-50 text-blue-800 font-bold">
+                          <th className="py-2.5 px-3.5 text-center whitespace-nowrap bg-slate-100 text-slate-900 font-bold">
                             {isJa ? '積載個数 (Qty)' : 'Loaded Qty'}
                           </th>
                           <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '小計重量 (kg)' : 'Subtotal Weight (kg)'}</th>
@@ -802,7 +798,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                                     <span className="font-mono text-[10px] text-slate-400">{item.sku}</span>
                                   </div>
                                   {item.fragile && (
-                                    <span className="bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.2 rounded font-semibold ml-1">
+                                    <span className="bg-slate-100 text-slate-800 border border-slate-300 text-[9px] px-1.5 py-0.2 rounded font-semibold ml-1">
                                       {isJa ? '割れ物' : 'Fragile'}
                                     </span>
                                   )}
@@ -814,8 +810,8 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                               <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-700 font-semibold">
                                 {item.unitWeight} kg
                               </td>
-                              <td className="py-2.5 px-3.5 text-center whitespace-nowrap bg-blue-50/40">
-                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-blue-600 text-white font-mono font-bold text-xs shadow-2xs">
+                              <td className="py-2.5 px-3.5 text-center whitespace-nowrap bg-slate-50">
+                                <span className="inline-flex items-center justify-center px-3 py-1 rounded-full bg-slate-900 text-white font-mono font-bold text-xs shadow-2xs">
                                   {item.count} {isJa ? '個' : 'pcs'}
                                 </span>
                               </td>
@@ -829,7 +825,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                                 <div className="flex items-center gap-2">
                                   <div className="w-16 bg-slate-100 h-1.5 rounded-full overflow-hidden">
                                     <div 
-                                      className="bg-blue-600 h-full rounded-full" 
+                                      className="bg-slate-900 h-full rounded-full" 
                                       style={{ width: `${Math.min(100, volSharePercent)}%` }} 
                                     />
                                   </div>
@@ -848,13 +844,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                           <td colSpan={4} className="py-2.5 px-3.5 text-right uppercase tracking-wider text-[11px] text-slate-500">
                             {isJa ? 'コンテナ積載合計:' : 'Container Total:'}
                           </td>
-                          <td className="py-2.5 px-3.5 text-center font-mono text-blue-700 text-sm bg-blue-100/50 font-bold">
+                          <td className="py-2.5 px-3.5 text-center font-mono text-slate-900 text-sm bg-slate-100 font-bold">
                             {currentLoad.totalCount} {isJa ? '個' : 'pcs'}
                           </td>
-                          <td className="py-2.5 px-3.5 font-mono text-emerald-700">
+                          <td className="py-2.5 px-3.5 font-mono text-slate-900">
                             {currentLoad.totalWeightKg.toLocaleString()} kg
                           </td>
-                          <td className="py-2.5 px-3.5 font-mono text-blue-700">
+                          <td className="py-2.5 px-3.5 font-mono text-slate-900">
                             {currentLoad.totalVolumeCbm.toFixed(3)} m³
                           </td>
                           <td className="py-2.5 px-3.5 font-mono text-slate-600">

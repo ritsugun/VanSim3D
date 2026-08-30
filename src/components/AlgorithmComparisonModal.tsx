@@ -171,15 +171,15 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
         {/* Modal Top Header */}
         <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between gap-4 shrink-0 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-inner">
-              <Zap className="w-5 h-5 text-yellow-300" />
+            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center shadow-inner text-white">
+              <Zap className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold tracking-tight">
                   {isJa ? '自動アルゴリズム切り替え & 一括比較ベンチマーク' : 'Algorithm Benchmark & Auto-Selector'}
                 </h2>
-                <span className="bg-yellow-400/20 text-yellow-300 border border-yellow-400/30 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full">
+                <span className="bg-slate-800 text-white border border-slate-700 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full">
                   MULTI-STRATEGY
                 </span>
               </div>
@@ -222,11 +222,11 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50/60">
           
           {/* Top Recommendation & Auto-Selector Bar */}
-          <div className="bg-white border border-blue-200 rounded-xl p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="bg-white border border-slate-300 rounded-xl p-4 sm:p-5 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div className="space-y-1.5 max-w-2xl">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="bg-blue-100 text-blue-800 font-bold text-xs px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-blue-600" />
+                <span className="bg-slate-100 text-slate-900 font-bold text-xs px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-slate-300">
+                  <Sparkles className="w-3 h-3 text-slate-800" />
                   {isJa ? 'AI 推奨エンジン' : 'AI Recommendation'}
                 </span>
                 <span className="text-xs text-slate-500 font-medium">
@@ -240,7 +240,7 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                     onClick={() => onToggleAutoAlgorithm(!isAutoAlgorithmEnabled)}
                     className={`ml-2 px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 border transition-all ${
                       isAutoAlgorithmEnabled
-                        ? 'bg-blue-600 text-white border-blue-700'
+                        ? 'bg-slate-900 text-white border-slate-900'
                         : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
                     }`}
                   >
@@ -254,7 +254,7 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                 <h3 className="text-base sm:text-lg font-bold text-slate-900">
                   {isJa ? criteriaBest.nameJa : criteriaBest.nameEn}
                 </h3>
-                <span className="bg-emerald-50 text-emerald-700 border border-emerald-300 font-mono font-bold text-xs px-2 py-0.5 rounded-md">
+                <span className="bg-slate-100 text-slate-900 border border-slate-300 font-mono font-bold text-xs px-2 py-0.5 rounded-md">
                   {isJa ? '総合スコア:' : 'Score:'} {criteriaBest.score}/100
                 </span>
               </div>
@@ -274,10 +274,10 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                     onToggleAutoAlgorithm(true);
                     handleApply(criteriaBest);
                   }}
-                  className="w-full sm:w-auto px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-95"
                   title={isJa ? '自動選定モードをONにして適用' : 'Enable auto-selector mode & apply'}
                 >
-                  <Bot className="w-4 h-4 text-indigo-600" />
+                  <Bot className="w-4 h-4 text-slate-800" />
                   <span>{isJa ? '自動選定をONにして適用' : 'Enable Auto & Apply'}</span>
                 </button>
               )}
@@ -286,9 +286,9 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                 id="apply-recommended-algo-btn"
                 type="button"
                 onClick={() => handleApply(criteriaBest)}
-                className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95"
+                className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95"
               >
-                <Zap className="w-4 h-4 text-yellow-300 fill-yellow-300" />
+                <Zap className="w-4 h-4 text-white" />
                 <span>{isJa ? 'このアルゴリズムを適用' : 'Apply Selected Algorithm'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
@@ -344,14 +344,14 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
           {/* Top 3 Category Winner Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Winner 1: Volume */}
-            <div className="bg-white border border-blue-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+            <div className="bg-white border border-slate-300 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Box className="w-3 h-3 text-blue-600" />
+                  <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Box className="w-3 h-3 text-slate-700" />
                     {isJa ? '最高容積充填' : 'Highest Volume'}
                   </span>
-                  <span className="text-sm font-extrabold text-blue-700 font-mono">
+                  <span className="text-sm font-extrabold text-slate-900 font-mono">
                     {maxVolumeBest.volumeUtilization}%
                   </span>
                 </div>
@@ -365,21 +365,21 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
               <button
                 type="button"
                 onClick={() => handleApply(maxVolumeBest)}
-                className="mt-3 w-full py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-colors"
+                className="mt-3 w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300 rounded-lg text-xs font-bold transition-colors"
               >
                 {isCurrentActive(maxVolumeBest) ? (isJa ? '✓ 適用中' : '✓ Active') : (isJa ? 'この方式を適用' : 'Apply')}
               </button>
             </div>
 
             {/* Winner 2: Min Containers */}
-            <div className="bg-white border border-amber-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+            <div className="bg-white border border-slate-300 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Truck className="w-3 h-3 text-amber-600" />
+                  <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Truck className="w-3 h-3 text-slate-700" />
                     {isJa ? '最少コンテナ台数' : 'Fewest Containers'}
                   </span>
-                  <span className="text-sm font-extrabold text-amber-700 font-mono">
+                  <span className="text-sm font-extrabold text-slate-900 font-mono">
                     {minContainersBest.containersCount} {isJa ? '台' : 'units'}
                   </span>
                 </div>
@@ -393,21 +393,21 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
               <button
                 type="button"
                 onClick={() => handleApply(minContainersBest)}
-                className="mt-3 w-full py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold transition-colors"
+                className="mt-3 w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300 rounded-lg text-xs font-bold transition-colors"
               >
                 {isCurrentActive(minContainersBest) ? (isJa ? '✓ 適用中' : '✓ Active') : (isJa ? 'この方式を適用' : 'Apply')}
               </button>
             </div>
 
             {/* Winner 3: Stability */}
-            <div className="bg-white border border-emerald-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+            <div className="bg-white border border-slate-300 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <Scale className="w-3 h-3 text-emerald-600" />
+                  <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Scale className="w-3 h-3 text-slate-700" />
                     {isJa ? '最高重心安定度' : 'Max CoG Stability'}
                   </span>
-                  <span className="text-sm font-extrabold text-emerald-700 font-mono">
+                  <span className="text-sm font-extrabold text-slate-900 font-mono">
                     {maxStabilityBest.cogStabilityScore} / 100
                   </span>
                 </div>
@@ -421,7 +421,7 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
               <button
                 type="button"
                 onClick={() => handleApply(maxStabilityBest)}
-                className="mt-3 w-full py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition-colors"
+                className="mt-3 w-full py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-900 border border-slate-300 rounded-lg text-xs font-bold transition-colors"
               >
                 {isCurrentActive(maxStabilityBest) ? (isJa ? '✓ 適用中' : '✓ Active') : (isJa ? 'この方式を適用' : 'Apply')}
               </button>
@@ -446,9 +446,9 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                     id={`benchmark-card-${entry.id}`}
                     className={`bg-white rounded-xl border p-4 transition-all ${
                       isActive
-                        ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-md'
+                        ? 'border-slate-900 ring-2 ring-slate-900/20 shadow-md'
                         : isSelectedForCriteria
-                        ? 'border-emerald-400 bg-emerald-50/20 shadow-xs'
+                        ? 'border-slate-400 bg-slate-50/50 shadow-xs'
                         : 'border-slate-200 hover:border-slate-300 hover:shadow-xs'
                     }`}
                   >
@@ -460,47 +460,43 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                           <span className="text-xs font-mono font-bold text-slate-400 w-5">
                             #{index + 1}
                           </span>
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            entry.tag === 'AI OPTIMIZATION'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                              : 'bg-slate-100 text-slate-600 border-slate-200'
-                          }`}>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-800 border-slate-300">
                             {entry.tag}
                           </span>
 
                           {entry.isOverallBest && (
-                            <span className="bg-yellow-100 text-yellow-800 border border-yellow-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                               👑 {isJa ? '総合スコア1位' : 'Overall Top 1'}
                             </span>
                           )}
 
                           {entry.isBestVolume && (
-                            <span className="bg-blue-100 text-blue-800 border border-blue-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
                               📦 {isJa ? '容積率 1位' : 'Max Volume'}
                             </span>
                           )}
 
                           {entry.isBestContainers && (
-                            <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
                               🚢 {isJa ? 'コンテナ本数 最小' : 'Min Containers'}
                             </span>
                           )}
 
                           {entry.isBestStability && (
-                            <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            <span className="bg-slate-100 text-slate-900 border border-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
                               ⚖️ {isJa ? '重心安定 1位' : 'Best CoG'}
                             </span>
                           )}
 
                           {isActive && (
-                            <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            <span className="bg-slate-900 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                               {isJa ? '● 現在適用中' : '● ACTIVE'}
                             </span>
                           )}
                         </div>
 
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-bold text-sm sm:text-base text-slate-900">
+                          <h4 className="font-bold text-sm sm:base text-slate-900">
                             {isJa ? entry.nameJa : entry.nameEn}
                           </h4>
                           <span className="text-xs text-slate-500 font-medium hidden sm:inline">
@@ -525,12 +521,12 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                           <div className="text-[10px] text-slate-500 font-semibold mb-0.5">
                             {isJa ? '容積充填率' : 'Volume'}
                           </div>
-                          <div className="text-sm font-extrabold text-blue-700 font-mono">
+                          <div className="text-sm font-extrabold text-slate-900 font-mono">
                             {entry.volumeUtilization}%
                           </div>
                           <div className="w-16 h-1.5 bg-slate-200 rounded-full mx-auto mt-1 overflow-hidden">
                             <div 
-                              className="h-full bg-blue-600 rounded-full" 
+                              className="h-full bg-slate-900 rounded-full" 
                               style={{ width: `${Math.min(100, entry.volumeUtilization)}%` }} 
                             />
                           </div>
@@ -554,7 +550,7 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                           <div className="text-[10px] text-slate-500 font-semibold mb-0.5">
                             {isJa ? '重心安定度' : 'Stability'}
                           </div>
-                          <div className="text-sm font-extrabold text-emerald-700 font-mono">
+                          <div className="text-sm font-extrabold text-slate-900 font-mono">
                             {entry.cogStabilityScore} <span className="text-[10px] text-slate-400 font-normal">/100</span>
                           </div>
                           <div className="text-[10px] text-slate-500 font-mono">
@@ -584,8 +580,8 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
                           onClick={() => handleApply(entry)}
                           className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs ${
                             isActive
-                              ? 'bg-blue-600 text-white cursor-default'
-                              : 'bg-white hover:bg-blue-600 text-slate-700 hover:text-white border border-slate-300 hover:border-blue-600'
+                              ? 'bg-slate-900 text-white cursor-default'
+                              : 'bg-white hover:bg-slate-900 text-slate-700 hover:text-white border border-slate-300 hover:border-slate-900'
                           }`}
                         >
                           {isActive ? (
@@ -630,9 +626,9 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
             <button
               type="button"
               onClick={() => handleApply(criteriaBest)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
             >
-              <Zap className="w-3.5 h-3.5 text-yellow-300" />
+              <Zap className="w-3.5 h-3.5 text-white" />
               <span>{isJa ? '最適解を適用して完了' : 'Apply Best & Finish'}</span>
             </button>
           </div>

@@ -168,27 +168,15 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
       {/* Panel Top Header Bar */}
       <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2.5">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-            isAutoAlgorithmEnabled 
-              ? 'bg-blue-600 text-white' 
-              : isGA 
-                ? 'bg-emerald-100 text-emerald-700' 
-                : 'bg-blue-100 text-blue-700'
-          }`}>
-            {isAutoAlgorithmEnabled ? <Bot className="w-4 h-4 text-yellow-300" /> : <Cpu className="w-4 h-4" />}
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-slate-900 text-white">
+            {isAutoAlgorithmEnabled ? <Bot className="w-4 h-4 text-white" /> : <Cpu className="w-4 h-4" />}
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wide">
                 {isJa ? '積載アルゴリズム設定' : 'Algorithm & Engine Settings'}
               </h2>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                isAutoAlgorithmEnabled
-                  ? 'bg-blue-50 text-blue-700 border-blue-300 font-mono'
-                  : isGA 
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300' 
-                    : 'bg-slate-100 text-slate-600 border-slate-200'
-              }`}>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-800 border-slate-300 font-mono">
                 {isAutoAlgorithmEnabled 
                   ? '🤖 AUTO SELECTOR ON' 
                   : isGA ? '🧬 AI GENETIC ACTIVE' : 'HEURISTIC ENGINE'}
@@ -203,43 +191,9 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Auto Selector Toggle Pill in Header */}
-          {onToggleAutoAlgorithm && (
-            <button
-              type="button"
-              id="panel-auto-toggle-btn"
-              onClick={() => onToggleAutoAlgorithm(!isAutoAlgorithmEnabled)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all ${
-                isAutoAlgorithmEnabled
-                  ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-              }`}
-            >
-              <Bot className={`w-3.5 h-3.5 ${isAutoAlgorithmEnabled ? 'text-yellow-300' : 'text-slate-500'}`} />
-              <span>{isJa ? '自動選定:' : 'Auto Mode:'}</span>
-              <span className={`font-mono font-extrabold ${isAutoAlgorithmEnabled ? 'text-yellow-300' : 'text-slate-500'}`}>
-                {isAutoAlgorithmEnabled ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          )}
-
-          {/* Benchmark comparison button */}
-          {onOpenBenchmarkModal && (
-            <button
-              type="button"
-              id="panel-open-benchmark-btn"
-              onClick={onOpenBenchmarkModal}
-              className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs flex items-center gap-1.5 border border-amber-200 shadow-xs transition-all active:scale-95"
-              title={isJa ? '全アルゴリズムを一括シミュレーションして比較' : 'Benchmark & compare all algorithms'}
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
-              <span>{isJa ? '⚡ 一括比較' : '⚡ Benchmark'}</span>
-            </button>
-          )}
-
           {/* Quick toggle algorithm dropdown in header bar (Active in manual mode) */}
           {!isAutoAlgorithmEnabled && (
-            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs">
+            <div className="flex items-center bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs">
               <span className="text-[11px] font-semibold text-slate-500 mr-2">
                 {isJa ? '手動選定:' : 'Engine:'}
               </span>
@@ -247,7 +201,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                 id="algorithm-select-panel"
                 value={algorithm}
                 onChange={(e) => onChangeAlgorithm(e.target.value as AlgorithmType)}
-                className="bg-transparent font-bold text-xs text-slate-800 outline-none cursor-pointer pr-1"
+                className="bg-transparent font-bold text-xs text-slate-900 outline-none cursor-pointer pr-1"
               >
                 {algorithms.map(algo => (
                   <option key={algo.id} value={algo.id}>
@@ -276,13 +230,13 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
           {/* Auto Algorithm Mode Card */}
           <div className={`rounded-xl border p-4 transition-all ${
             isAutoAlgorithmEnabled
-              ? 'bg-blue-50/70 border-blue-300 shadow-xs'
+              ? 'bg-slate-50 border-slate-400 shadow-xs'
               : 'bg-slate-50 border-slate-200'
           }`}>
             <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
               <div className="flex items-center gap-2.5">
                 <div className={`p-2 rounded-lg ${
-                  isAutoAlgorithmEnabled ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                  isAutoAlgorithmEnabled ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-600'
                 }`}>
                   <Bot className="w-4 h-4" />
                 </div>
@@ -293,7 +247,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                     </h3>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                       isAutoAlgorithmEnabled
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-slate-900 text-white'
                         : 'bg-slate-200 text-slate-600'
                     }`}>
                       {isAutoAlgorithmEnabled ? (isJa ? '有効 (ON)' : 'ENABLED') : (isJa ? '無効 (OFF)' : 'DISABLED')}
@@ -313,7 +267,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                   onClick={() => onToggleAutoAlgorithm(!isAutoAlgorithmEnabled)}
                   className={`px-4 py-2 rounded-lg font-bold text-xs flex items-center gap-2 transition-all active:scale-95 shadow-xs ${
                     isAutoAlgorithmEnabled
-                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                      ? 'bg-slate-900 hover:bg-slate-800 text-white'
                       : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-300'
                   }`}
                 >
@@ -325,8 +279,8 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
 
             {/* Criteria Tabs (Shown when Auto Mode is active) */}
             {isAutoAlgorithmEnabled && onChangeAutoCriteria && (
-              <div className="mt-3 pt-3 border-t border-blue-200/80">
-                <p className="text-[11px] font-bold text-blue-900 mb-2">
+              <div className="mt-3 pt-3 border-t border-slate-300">
+                <p className="text-[11px] font-bold text-slate-900 mb-2">
                   {isJa ? '🎯 自動選定の優先目標基準を選択:' : '🎯 Select Auto-Selection Target Objective:'}
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
@@ -343,8 +297,8 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                       onClick={() => onChangeAutoCriteria(tab.id)}
                       className={`p-2.5 rounded-lg border text-left transition-all ${
                         autoSelectCriteria === tab.id
-                          ? 'bg-white border-blue-600 ring-2 ring-blue-500/20 shadow-xs'
-                          : 'bg-white/60 hover:bg-white border-blue-200/80 text-slate-700'
+                          ? 'bg-white border-slate-900 ring-2 ring-slate-900/20 shadow-xs'
+                          : 'bg-white/60 hover:bg-white border-slate-300 text-slate-700'
                       }`}
                     >
                       <div className="font-bold text-xs text-slate-900 leading-tight">
@@ -363,13 +317,13 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
           {/* Target Optimization Section (Always visible, highlights active target) */}
           <div id="target-optimization-section" className={`rounded-xl border p-4 transition-all ${
             isGA 
-              ? 'bg-emerald-50/60 border-emerald-200 shadow-xs' 
+              ? 'bg-slate-50 border-slate-400 shadow-xs' 
               : 'bg-slate-50/70 border-slate-200'
           }`}>
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <div className={`p-1.5 rounded-lg ${
-                  isGA ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'
+                  isGA ? 'bg-slate-900 text-white' : 'bg-slate-200 text-slate-700'
                 }`}>
                   <Target className="w-4 h-4" />
                 </div>
@@ -378,7 +332,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                     <h3 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wide">
                       Target Optimization
                     </h3>
-                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200">
+                    <span className="text-[11px] font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300">
                       {isJa ? '遺伝的アルゴリズム (GA) 最適化目標' : 'Genetic Algorithm Goal'}
                     </span>
                   </div>
@@ -391,7 +345,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
               </div>
 
               {!isGA && (
-                <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg">
+                <span className="text-[11px] font-semibold text-slate-800 bg-slate-100 border border-slate-300 px-2.5 py-1 rounded-lg">
                   {isJa ? '💡 目標をクリックすると自動でGAに切り替わります' : '💡 Selecting a goal switches to GA mode'}
                 </span>
               )}
@@ -411,7 +365,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                     onClick={() => handleSelectTargetGoal(opt.id)}
                     className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col justify-between group cursor-pointer ${
                       isSelected
-                        ? 'bg-white border-emerald-500 shadow-md ring-2 ring-emerald-500/20 text-slate-900'
+                        ? 'bg-white border-slate-900 shadow-md ring-2 ring-slate-900/20 text-slate-900'
                         : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300 text-slate-700 hover:shadow-xs'
                     }`}
                   >
@@ -420,7 +374,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                       <div className="flex items-center justify-between mb-2">
                         <div className={`p-2 rounded-lg transition-colors ${
                           isSelected 
-                            ? 'bg-emerald-600 text-white shadow-xs' 
+                            ? 'bg-slate-900 text-white shadow-xs' 
                             : 'bg-slate-100 text-slate-600 group-hover:bg-slate-200'
                         }`}>
                           <Icon className="w-4 h-4" />
@@ -429,13 +383,13 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                         <div className="flex items-center gap-1.5">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                             isSelected
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              ? 'bg-slate-900 text-white'
                               : 'bg-slate-100 text-slate-500'
                           }`}>
                             {isJa ? opt.badgeJa : opt.badgeEn}
                           </span>
                           {isSelected && (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <CheckCircle2 className="w-4 h-4 text-slate-900 shrink-0" />
                           )}
                         </div>
                       </div>
@@ -456,11 +410,11 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
 
                     {/* Bottom Status bar */}
                     <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                      <span className={`font-semibold ${isSelected ? 'text-emerald-700' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                      <span className={`font-semibold ${isSelected ? 'text-slate-900' : 'text-slate-400 group-hover:text-slate-600'}`}>
                         {isSelected ? (isJa ? '● 適用中' : '● ACTIVE') : (isJa ? '選択して適用' : 'Click to apply')}
                       </span>
                       {isSelected && (
-                        <span className="text-[10px] text-emerald-600 font-mono font-bold">
+                        <span className="text-[10px] text-slate-900 font-mono font-bold">
                           Fitness Target ✓
                         </span>
                       )}
@@ -485,7 +439,7 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
                     onClick={() => onChangeAlgorithm(algo.id)}
                     className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
                       algorithm === algo.id
-                        ? 'bg-blue-600 text-white shadow-xs'
+                        ? 'bg-slate-900 text-white shadow-xs'
                         : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                     }`}
                   >
@@ -496,8 +450,8 @@ export const AlgorithmSettingsPanel: React.FC<AlgorithmSettingsPanelProps> = ({
             </div>
 
             {/* Bottom Support Constraint Badge */}
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <div className="flex items-center gap-1 text-[11px] font-semibold text-slate-800 bg-slate-100 border border-slate-300 px-2.5 py-1 rounded-lg">
+              <ShieldCheck className="w-3.5 h-3.5 text-slate-900" />
               <span>{isJa ? '底面完全支持・浮遊禁止 常時有効' : '100% Bottom Support Enforced'}</span>
             </div>
           </div>
