@@ -14,7 +14,8 @@ import { AiConsultantModal } from './components/AiConsultantModal';
 import { AlgorithmComparisonModal } from './components/AlgorithmComparisonModal';
 import { 
   Box, BarChart3, ListOrdered, Truck, Sparkles, 
-  Layers, Sliders, CheckCircle2, ShieldAlert, Zap, Bot 
+  Layers, Sliders, CheckCircle2, ShieldAlert, Zap, Bot,
+  AlertTriangle, ChevronDown 
 } from 'lucide-react';
 
 export default function App() {
@@ -37,6 +38,7 @@ export default function App() {
   const [isBenchmarkModalOpen, setIsBenchmarkModalOpen] = useState<boolean>(false);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const [showAlgorithmPanel, setShowAlgorithmPanel] = useState<boolean>(false);
+  const [showSafetyDetails, setShowSafetyDetails] = useState<boolean>(false);
 
   const isJa = language === 'ja';
 
@@ -106,9 +108,20 @@ export default function App() {
     }, 200);
   }, []);
 
-  const totalItemCount = useMemo(() => {
-    return cargoList.reduce((s, c) => s + c.quantity, 0);
+  // Total raw quantity entered across all cargo items
+  const totalRawCargoCount = useMemo(() => {
+    return cargoList.reduce((s, c) => s + (Number(c.quantity) || 0), 0);
   }, [cargoList]);
+
+  // Actual number of items targeted by the 3D optimization calculation (3,320)
+  const optimizationTargetCount = useMemo(() => {
+    return packingResult.overallMetrics?.totalItemsCount ?? packingResult.metrics.totalItemCount ?? 0;
+  }, [packingResult]);
+
+  // Count of items excluded due to the 500-item safety limit (19,500)
+  const safetyLimitTruncatedCount = useMemo(() => {
+    return packingResult.safetyLimitTruncatedCount ?? 0;
+  }, [packingResult]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
@@ -141,7 +154,9 @@ export default function App() {
         onToggleAlgorithmPanel={() => setShowAlgorithmPanel(!showAlgorithmPanel)}
         activeTab={activeTab}
         onChangeTab={setActiveTab}
-        totalItemCount={totalItemCount}
+        totalItemCount={optimizationTargetCount}
+        totalRawItemCount={totalRawCargoCount}
+        safetyLimitTruncatedCount={safetyLimitTruncatedCount}
         containerUnitsCount={packingResult.containers?.length || 1}
         volumeUtilization={packingResult.metrics.volumeUtilization}
         packedItemCount={packingResult.packedItems.length}
@@ -150,6 +165,70 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 space-y-4">
+        
+        {/* Safety Limit Truncation Alert Banner */}
+        {safetyLimitTruncatedCount > 0 && (
+          <div 
+            id="safety-limit-alert-banner"
+            className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3.5 sm:p-4 text-amber-950 shadow-xs animate-fadeIn"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold shrink-0 mt-0.5 shadow-xs">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-sm text-amber-950">
+                      {isJa 
+                        ? `${safetyLimitTruncatedCount.toLocaleString()} 個の貨物が安全リミットにより除外されました`
+                        : `${safetyLimitTruncatedCount.toLocaleString()} cargo items were excluded by the safety limit`}
+                    </h4>
+                    <span className="bg-amber-200/80 text-amber-900 border border-amber-400/60 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full">
+                      {isJa ? '1品目あたり上限 500個' : 'Max 500 units/item'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900 mt-1 leading-relaxed">
+                    {isJa 
+                      ? `ブラウザのクラッシュ・フリーズを防ぐため、1品目あたりの数量上限を500個に制限しています。最適化計算の対象数は ${optimizationTargetCount.toLocaleString()} 個（登録総数: ${totalRawCargoCount.toLocaleString()} 個）です。`
+                      : `To prevent browser performance lag, cargo quantities are capped at 500 units per item. The optimization calculation target is ${optimizationTargetCount.toLocaleString()} items (Total registered: ${totalRawCargoCount.toLocaleString()}).`}
+                  </p>
+                </div>
+              </div>
+
+              {packingResult.truncatedItems && packingResult.truncatedItems.length > 0 && (
+                <button
+                  type="button"
+                  id="toggle-safety-details-btn"
+                  onClick={() => setShowSafetyDetails(!showSafetyDetails)}
+                  className="shrink-0 text-xs bg-white hover:bg-amber-100/70 text-amber-900 border border-amber-300 font-semibold px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                >
+                  <span>{showSafetyDetails ? (isJa ? '内訳を閉じる' : 'Hide Details') : (isJa ? '除外内訳を表示' : 'Show Details')}</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showSafetyDetails ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+            </div>
+
+            {/* Expandable details of truncated SKUs */}
+            {showSafetyDetails && packingResult.truncatedItems && packingResult.truncatedItems.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-amber-200/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {packingResult.truncatedItems.map((item) => (
+                  <div key={item.cargoId} className="bg-white/90 border border-amber-200 rounded-lg p-2.5 text-xs flex justify-between items-center shadow-2xs">
+                    <div className="truncate pr-2">
+                      <span className="font-bold text-slate-800">{item.name}</span>
+                      {item.sku && <span className="text-[10px] text-slate-500 font-mono ml-1">({item.sku})</span>}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] text-slate-400 line-through mr-1">{item.requestedQty.toLocaleString()}</span>
+                      <span className="font-bold text-slate-900 font-mono">500</span>
+                      <span className="text-amber-700 font-bold ml-1.5 text-[11px]">(-{item.truncatedQty.toLocaleString()})</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         
         {/* Algorithm Settings & Target Optimization Panel (Hidden by default, toggleable via Header) */}
         {showAlgorithmPanel && (
@@ -260,8 +339,9 @@ export default function App() {
                 containerCount={containerCount}
                 onChangeContainerCount={setContainerCount}
                 totalContainersNeeded={packingResult.overallMetrics?.totalContainersCount || packingResult.metrics.containersNeeded}
-                totalItemsCount={totalItemCount}
+                totalItemsCount={optimizationTargetCount}
                 totalPackedCount={packingResult.packedItems.length}
+                safetyLimitTruncatedCount={safetyLimitTruncatedCount}
               />
             </div>
 

@@ -76,6 +76,7 @@ export interface CargoItem {
   allowRoll?: boolean; // 縦回転(ロール) - 無効
   maxStackWeight?: number; // kg that can be placed on top of this item
   fragile?: boolean;   // If fragile, nothing can be stacked on top (or max stack weight = 0)
+  floorPlacement?: boolean; // 床置き (Floor Placement: must be placed directly on container floor z=0, default: false)
   priority?: number;   // 1 = High / Load first (or unload last), 3 = Normal, 5 = Unload first (at door)
   group?: string;
   enabled?: boolean;   // true = 積載対象 (デフォルト), false = 積載除外 (スキップ)
@@ -95,6 +96,7 @@ export interface PackedItem {
   weight: number; // kg
   color: string;
   fragile: boolean;
+  floorPlacement?: boolean;
   sequenceNumber: number; // 1, 2, 3... loading sequence
   stepIndex: number;
   rotationIndex: number; // 0..5
@@ -106,10 +108,19 @@ export interface UnplacedItem {
   cargoItemId: string;
   sku: string;
   name: string;
-  reason: 'exceeds_weight' | 'no_spatial_fit' | 'stacking_constraint';
+  reason: 'exceeds_weight' | 'no_spatial_fit' | 'stacking_constraint' | 'floor_constraint';
   dimensions: { length: number; width: number; height: number };
   weight: number;
   count: number;
+}
+
+export interface TruncatedItemDetail {
+  cargoId: string;
+  name: string;
+  sku: string;
+  requestedQty: number;
+  cappedQty: number;
+  truncatedQty: number;
 }
 
 export interface PackingMetrics {
@@ -125,6 +136,8 @@ export interface PackingMetrics {
   totalItemCount: number;
   packedCount: number;
   unplacedCount: number;
+  rawTotalItemCount?: number;
+  safetyLimitTruncatedCount?: number;
   
   centerOfGravity: {
     x: number; // mm
@@ -168,6 +181,8 @@ export interface OverallPackingMetrics {
   totalCostEstimate?: number;
   totalContainersCount?: number;
   totalItemsCount?: number;
+  rawTotalItemCount?: number;
+  safetyLimitTruncatedCount?: number;
 }
 
 export interface PackingResult {
@@ -178,6 +193,9 @@ export interface PackingResult {
   metrics: PackingMetrics;
   overallMetrics?: OverallPackingMetrics;
   gaParameters?: GAParameterInfo;
+  rawTotalItemCount?: number;
+  safetyLimitTruncatedCount?: number;
+  truncatedItems?: TruncatedItemDetail[];
 }
 
 export interface AiConsultantResponse {

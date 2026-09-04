@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Container, Language, UnitSystem } from '../types';
 import { STANDARD_CONTAINERS } from '../data/presets';
-import { Container as ContainerIcon, Truck, Box, Plus, Check, Settings2 } from 'lucide-react';
+import { Container as ContainerIcon, Truck, Box, Plus, Check, Settings2, AlertTriangle } from 'lucide-react';
 import { formatDimensions, formatVolume, formatWeight } from '../utils/units';
 
 interface ContainerSelectorProps {
@@ -16,6 +16,7 @@ interface ContainerSelectorProps {
   totalContainersNeeded?: number;
   totalItemsCount?: number;
   totalPackedCount?: number;
+  safetyLimitTruncatedCount?: number;
 }
 
 export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
@@ -29,7 +30,8 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
   onChangeContainerCount,
   totalContainersNeeded = 1,
   totalItemsCount = 0,
-  totalPackedCount = 0
+  totalPackedCount = 0,
+  safetyLimitTruncatedCount = 0
 }) => {
   const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
   const [customForm, setCustomForm] = useState<Container>({
@@ -189,6 +191,17 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
               </span>
             )}
           </div>
+
+          {safetyLimitTruncatedCount > 0 && (
+            <div className="mt-1 text-[10.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 flex items-center gap-1 font-medium">
+              <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+              <span>
+                {isJa 
+                  ? `安全リミット適用: ${safetyLimitTruncatedCount.toLocaleString()}個除外 (各品目最大500個)` 
+                  : `Safety limit: ${safetyLimitTruncatedCount.toLocaleString()} items excluded (max 500/item)`}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

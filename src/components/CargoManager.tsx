@@ -4,7 +4,8 @@ import { SAMPLE_CARGO_PRESETS, CargoPreset, SAMPLE_CSV_TEMPLATE } from '../data/
 import { 
   Plus, Trash2, Upload, Download, Sparkles, 
   ShieldAlert, Check, FileSpreadsheet, FileDown,
-  Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers
+  Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers, ArrowDownToLine,
+  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
 
@@ -49,6 +50,53 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [importNotification, setImportNotification] = useState<string | null>(null);
 
+  // Sorting and search controls state for Cargo manifest
+  const [sortField, setSortField] = useState<'none' | 'name' | 'weight' | 'quantity'>('none');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const handleSortToggle = (field: 'name' | 'weight' | 'quantity') => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      // Sensible defaults: A-Z (asc) for name, heaviest (desc) for weight, highest qty (desc) for quantity
+      setSortOrder(field === 'name' ? 'asc' : 'desc');
+    }
+  };
+
+  const handleResetSort = () => {
+    setSortField('none');
+    setSortOrder('asc');
+  };
+
+  const handleApplySortToManifest = () => {
+    if (sortField === 'none') return;
+    const sortedEntireList = [...cargoList].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'name') {
+        const nameA = (a.name || a.sku || '').trim();
+        const nameB = (b.name || b.sku || '').trim();
+        cmp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      } else if (sortField === 'weight') {
+        cmp = (Number(a.weight) || 0) - (Number(b.weight) || 0);
+      } else if (sortField === 'quantity') {
+        cmp = (Number(a.quantity) || 0) - (Number(b.quantity) || 0);
+      }
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+    onChangeCargoList(sortedEntireList);
+    setSortField('none');
+    const fieldLabel = sortField === 'name' ? (isJa ? '品名' : 'Name') : sortField === 'weight' ? (isJa ? '重量' : 'Weight') : (isJa ? '数量' : 'Quantity');
+    const orderLabel = sortOrder === 'asc' ? (isJa ? '昇順' : 'Ascending') : (isJa ? '降順' : 'Descending');
+    setImportNotification(
+      isJa 
+        ? `${fieldLabel}（${orderLabel}）の並び順をマニフェストに反映しました` 
+        : `Applied ${fieldLabel} (${orderLabel}) order to manifest`
+    );
+    setTimeout(() => setImportNotification(null), 3000);
+  };
+
   // New item draft form state
   const [newItem, setNewItem] = useState<Omit<CargoItem, 'id'>>({
     sku: 'CMB-M108V-KB1',
@@ -64,6 +112,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     allowYaw: true,
     maxStackWeight: 120,
     fragile: false,
+    floorPlacement: false,
     priority: 3,
     enabled: true
   });
@@ -81,6 +130,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       height: Math.max(10, Number(newItem.height)),
       weight: Math.max(0.1, Number(newItem.weight)),
       quantity: Math.max(1, Number(newItem.quantity || 1)),
+      floorPlacement: !!newItem.floorPlacement,
       enabled: true
     };
     onChangeCargoList([...cargoList, created]);
@@ -100,6 +150,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       allowYaw: true,
       maxStackWeight: 100,
       fragile: false,
+      floorPlacement: false,
       priority: 3,
       enabled: true
     });
@@ -122,13 +173,13 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     onChangeCargoList(cargoList.map(c => ({ ...c, enabled: enable })));
   };
 
-  // Consolidate & Aggregate identical cargo items (same SKU/name, dimensions, weight, fragile & rotation rules)
+  // Consolidate & Aggregate identical cargo items (same SKU/name, dimensions, weight, fragile & rotation rules, and floor placement)
   const handleConsolidateDuplicates = () => {
     const map = new Map<string, CargoItem>();
     let mergedCount = 0;
 
     cargoList.forEach(item => {
-      const key = `${item.name.trim().toLowerCase()}_${item.width}_${item.height}_${item.length}_${item.weight}_${item.allowYaw !== false}_${Boolean(item.fragile)}`;
+      const key = `${item.name.trim().toLowerCase()}_${item.width}_${item.height}_${item.length}_${item.weight}_${item.allowYaw !== false}_${Boolean(item.fragile)}_${Boolean(item.floorPlacement)}`;
       if (map.has(key)) {
         const existing = map.get(key)!;
         existing.quantity += item.quantity;
@@ -159,9 +210,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     setShowPresetsModal(false);
   };
 
-  // Export CSV (Following schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0),積載対象(1/0))
+  // Export CSV (Following schema: 貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0),床置き(1/0),積載対象(1/0))
   const handleExportCsv = () => {
-    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)', '積載対象(1/0)'];
+    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)', '床置き(1/0)', '積載対象(1/0)'];
     const rows = cargoList.map(c => [
       `"${c.name}"`,
       c.width,
@@ -172,6 +223,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       c.allowYaw !== false ? 1 : 0,
       c.color,
       c.fragile ? 1 : 0,
+      c.floorPlacement ? 1 : 0,
       c.enabled !== false ? 1 : 0
     ]);
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
@@ -227,6 +279,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
       let rotIdx = headerParts.findIndex(h => /横回転|3D回転|回転許可|回転|Rotate|Rotation|Yaw/i.test(h));
       let colorIdx = headerParts.findIndex(h => /カラー|色|Color|Hex/i.test(h));
       let fragileIdx = headerParts.findIndex(h => /割れ物|天地無用|壊れ物|壊れもの|Fragile/i.test(h));
+      let floorIdx = headerParts.findIndex(h => /床置き|床面|床|Floor|FloorPlacement|MustBeOnFloor/i.test(h));
       let enabledIdx = headerParts.findIndex(h => /積載対象|積載|対象|Enabled|Active|Include|Select/i.test(h));
 
       // Positional fallbacks
@@ -270,6 +323,13 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           isFragile = itemHeight > 1800;
         }
 
+        // Explicit Floor Placement Check (1/0 or true/false)
+        let isFloorPlacement = false;
+        if (floorIdx !== -1 && parts[floorIdx] !== undefined && parts[floorIdx] !== '') {
+          const rawFloor = parts[floorIdx].toLowerCase().trim();
+          isFloorPlacement = rawFloor === '1' || rawFloor === 'true' || rawFloor === 'yes' || rawFloor === '床置き' || rawFloor === '要';
+        }
+
         // Explicit Enabled / Selected Flag Check
         let isEnabled = true;
         if (enabledIdx !== -1 && parts[enabledIdx] !== undefined && parts[enabledIdx] !== '') {
@@ -292,6 +352,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
           allowYaw: allowRot,
           maxStackWeight: isFragile ? 0 : (itemHeight > 1800 ? 0 : 150),
           fragile: isFragile,
+          floorPlacement: isFloorPlacement,
           priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3),
           enabled: isEnabled
         });
@@ -299,7 +360,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
 
       if (newItems.length > 0) {
         onChangeCargoList(newItems);
-        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！（割れ物・積載フラグ反映済）` : `Successfully imported ${newItems.length} cargo items from CSV with settings!`);
+        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！（割れ物・床置き・積載フラグ反映済）` : `Successfully imported ${newItems.length} cargo items from CSV with settings!`);
         setTimeout(() => setImportNotification(null), 4000);
       }
     };
@@ -319,7 +380,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const hasDuplicateItems = useMemo(() => {
     const seen = new Set<string>();
     for (const item of cargoList) {
-      const key = `${item.name.trim().toLowerCase()}_${item.width}_${item.height}_${item.length}_${item.weight}_${item.allowYaw !== false}_${Boolean(item.fragile)}`;
+      const key = `${item.name.trim().toLowerCase()}_${item.width}_${item.height}_${item.length}_${item.weight}_${item.allowYaw !== false}_${Boolean(item.fragile)}_${Boolean(item.floorPlacement)}`;
       if (seen.has(key)) return true;
       seen.add(key);
     }
@@ -332,6 +393,56 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const activeVolumeCbm = activeCargoList.reduce((sum, c) => sum + (c.length * c.width * c.height * c.quantity) / 1_000_000_000, 0);
   const activeWeightKg = activeCargoList.reduce((sum, c) => sum + (c.weight * c.quantity), 0);
   const containerVolCbm = (container.length * container.width * container.height) / 1_000_000_000;
+
+  // Safety limit calculation (capped at 500 units per line item)
+  const safetyCappedStats = useMemo(() => {
+    let truncatedCount = 0;
+    let itemsOverCap = 0;
+    activeCargoList.forEach(c => {
+      const q = Math.max(0, Number(c.quantity) || 0);
+      if (q > 500) {
+        truncatedCount += (q - 500);
+        itemsOverCap += 1;
+      }
+    });
+    return { truncatedCount, itemsOverCap };
+  }, [activeCargoList]);
+
+  // Filtered and sorted manifest items
+  const displayedCargoList = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const filtered = query
+      ? cargoList.filter(item => 
+          (item.name && item.name.toLowerCase().includes(query)) ||
+          (item.sku && item.sku.toLowerCase().includes(query))
+        )
+      : [...cargoList];
+
+    if (sortField === 'none') {
+      return filtered;
+    }
+
+    const originalIndices = new Map(cargoList.map((item, i) => [item.id, i]));
+
+    return filtered.sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'name') {
+        const nameA = (a.name || a.sku || '').trim();
+        const nameB = (b.name || b.sku || '').trim();
+        cmp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      } else if (sortField === 'weight') {
+        cmp = (Number(a.weight) || 0) - (Number(b.weight) || 0);
+      } else if (sortField === 'quantity') {
+        cmp = (Number(a.quantity) || 0) - (Number(b.quantity) || 0);
+      }
+
+      if (cmp === 0) {
+        cmp = (originalIndices.get(a.id) ?? 0) - (originalIndices.get(b.id) ?? 0);
+      }
+
+      return sortOrder === 'asc' ? cmp : -cmp;
+    });
+  }, [cargoList, sortField, sortOrder, searchQuery]);
 
   return (
     <div id="cargo-manager-root" className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs text-slate-800 flex flex-col h-full">
@@ -459,6 +570,25 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs flex items-center gap-2 animate-fade-in">
           <Check className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{importNotification}</span>
+        </div>
+      )}
+
+      {/* Safety Limit Warning Banner if items capped */}
+      {safetyCappedStats.truncatedCount > 0 && (
+        <div id="cargo-safety-limit-banner" className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 text-xs flex items-start gap-2.5 shadow-xs">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <span className="font-bold">
+              {isJa 
+                ? `${safetyCappedStats.truncatedCount.toLocaleString()} 個の貨物が安全リミットにより除外されました`
+                : `${safetyCappedStats.truncatedCount.toLocaleString()} items excluded by the safety limit`}
+            </span>
+            <p className="text-[11px] text-amber-800 leading-relaxed">
+              {isJa 
+                ? `ブラウザのパフォーマンス保護のため、1品目あたりの最適化計算上限は500個となります。${safetyCappedStats.itemsOverCap}件の品目で500個を超える数量が登録されています（計算対象は各品目最大500個）。` 
+                : `To protect browser performance, packing optimization is capped at 500 units per line item. ${safetyCappedStats.itemsOverCap} items exceed this limit (calculated at max 500 each).`}
+            </p>
+          </div>
         </div>
       )}
 
@@ -619,7 +749,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-700 font-medium">
                 <input
                   type="checkbox"
@@ -644,6 +774,19 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                 />
                 <span>{isJa ? '天地無用 / 割れ物' : 'Fragile / Top Only'}</span>
               </label>
+
+              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                <input
+                  type="checkbox"
+                  checked={!!newItem.floorPlacement}
+                  onChange={e => setNewItem({ ...newItem, floorPlacement: e.target.checked })}
+                  className="rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="flex items-center gap-1">
+                  <ArrowDownToLine className="w-3 h-3 text-amber-700" />
+                  {isJa ? '床置き (必ず床面配置)' : 'Floor Placement (z=0)'}
+                </span>
+              </label>
             </div>
 
             <button
@@ -656,6 +799,165 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         </form>
       )}
 
+      {/* Manifest Search & Sorting Toolbar */}
+      {cargoList.length > 0 && (
+        <div 
+          id="cargo-manifest-controls" 
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 bg-slate-50/90 p-2.5 rounded-xl border border-slate-200"
+        >
+          {/* Quick Search Field */}
+          <div className="relative flex-1 min-w-[160px]">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              id="cargo-search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={isJa ? '品名・型番で検索...' : 'Search items or SKU...'}
+              className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-7 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-2xs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                id="clear-cargo-search-btn"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
+                title={isJa ? '検索解除' : 'Clear search'}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Sort Controls (Name, Weight, Quantity) */}
+          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+            <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1 shrink-0">
+              <ArrowUpDown className="w-3 h-3 text-slate-400" />
+              <span>{isJa ? '並び替え:' : 'Sort:'}</span>
+            </span>
+
+            {/* Sort Field Segmented Buttons */}
+            <div className="inline-flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
+              {/* Sort by Name */}
+              <button
+                type="button"
+                id="sort-by-name-btn"
+                onClick={() => handleSortToggle('name')}
+                title={isJa 
+                  ? (sortField === 'name' ? (sortOrder === 'asc' ? '品名: A→Z (昇順) - クリックで降順' : '品名: Z→A (降順) - クリックで昇順') : '品名で並び替え') 
+                  : 'Sort by name'}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                  sortField === 'name'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <span>{isJa ? '品名' : 'Name'}</span>
+                {sortField === 'name' && (
+                  sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                )}
+              </button>
+
+              {/* Sort by Weight */}
+              <button
+                type="button"
+                id="sort-by-weight-btn"
+                onClick={() => handleSortToggle('weight')}
+                title={isJa 
+                  ? (sortField === 'weight' ? (sortOrder === 'asc' ? '重量: 軽い順 (昇順) - クリックで重い順' : '重量: 重い順 (降順) - クリックで軽い順') : '重量で並び替え') 
+                  : 'Sort by weight'}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                  sortField === 'weight'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <span>{isJa ? '重量' : 'Weight'}</span>
+                {sortField === 'weight' && (
+                  sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                )}
+              </button>
+
+              {/* Sort by Quantity */}
+              <button
+                type="button"
+                id="sort-by-quantity-btn"
+                onClick={() => handleSortToggle('quantity')}
+                title={isJa 
+                  ? (sortField === 'quantity' ? (sortOrder === 'asc' ? '数量: 少ない順 (昇順) - クリックで多い順' : '数量: 多い順 (降順) - クリックで少ない順') : '数量で並び替え') 
+                  : 'Sort by quantity'}
+                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                  sortField === 'quantity'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <span>{isJa ? '数量' : 'Qty'}</span>
+                {sortField === 'quantity' && (
+                  sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                )}
+              </button>
+            </div>
+
+            {/* Explicit Sort Direction Toggle */}
+            {sortField !== 'none' && (
+              <button
+                type="button"
+                id="toggle-sort-order-btn"
+                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                title={isJa ? (sortOrder === 'asc' ? '昇順 (クリックで降順に変更)' : '降順 (クリックで昇順に変更)') : 'Toggle sort order'}
+                className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              >
+                {sortOrder === 'asc' ? (
+                  <>
+                    <ArrowUp className="w-3 h-3 text-blue-600" />
+                    <span className="text-[11px]">{isJa ? '昇順' : 'Asc'}</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowDown className="w-3 h-3 text-blue-600" />
+                    <span className="text-[11px]">{isJa ? '降順' : 'Desc'}</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Reset to Original Manifest Order */}
+            {sortField !== 'none' && (
+              <button
+                type="button"
+                id="reset-sort-btn"
+                onClick={handleResetSort}
+                title={isJa ? '元の登録順に戻す' : 'Reset to original manifest order'}
+                className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3 text-slate-500" />
+                <span className="text-[11px]">{isJa ? '解除' : 'Reset'}</span>
+              </button>
+            )}
+
+            {/* Apply sorted order to manifest */}
+            {sortField !== 'none' && (
+              <button
+                type="button"
+                id="apply-sort-order-btn"
+                onClick={handleApplySortToManifest}
+                title={isJa ? '現在の並び順をマニフェスト（登録順）に保存して固定' : 'Save current order to manifest list'}
+                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+              >
+                <Check className="w-3 h-3 text-indigo-600" />
+                <span className="text-[11px]">{isJa ? '並び順を固定' : 'Save Order'}</span>
+              </button>
+            )}
+
+            {/* Display count */}
+            <span className="text-[11px] text-slate-400 font-mono pl-1">
+              {displayedCargoList.length}/{cargoList.length}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Cargo List Items Table */}
       <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 max-h-[540px] xl:max-h-[600px] custom-scrollbar">
         {cargoList.length === 0 ? (
@@ -663,8 +965,23 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 text-slate-300" />
             <p>{isJa ? '貨物が登録されていません。「CSV取込」または「サンプル混載プリセット」を選択してください。' : 'No cargo items yet. Click "Import" or load a sample preset.'}</p>
           </div>
+        ) : displayedCargoList.length === 0 ? (
+          <div className="text-center py-8 text-slate-400 text-xs bg-slate-50 rounded-xl border border-slate-200">
+            <Search className="w-6 h-6 mx-auto mb-1.5 text-slate-300" />
+            <p className="font-semibold text-slate-600">
+              {isJa ? `「${searchQuery}」に一致する貨物が見つかりません` : `No cargo items matching "${searchQuery}"`}
+            </p>
+            <button
+              type="button"
+              id="empty-clear-search-btn"
+              onClick={() => setSearchQuery('')}
+              className="mt-2 text-blue-600 hover:text-blue-700 font-medium underline text-xs cursor-pointer"
+            >
+              {isJa ? '検索条件をクリア' : 'Clear search'}
+            </button>
+          </div>
         ) : (
-          cargoList.map((cargo) => {
+          displayedCargoList.map((cargo) => {
             const isEditing = editingItemId === cargo.id;
             const isEnabled = cargo.enabled !== false;
 
@@ -731,9 +1048,21 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                             const val = Math.max(1, Number(e.target.value) || 1);
                             handleUpdateItem(cargo.id, { quantity: val });
                           }}
-                          className="w-9 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
+                          className="w-12 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
                         />
                       </div>
+
+                      {cargo.quantity > 500 && (
+                        <span 
+                          title={isJa 
+                            ? `安全リミット適用中: ${cargo.quantity.toLocaleString()}個中 500個を計算対象とし、${(cargo.quantity - 500).toLocaleString()}個を除外しています` 
+                            : `Safety limit: 500 of ${cargo.quantity.toLocaleString()} calculated, ${(cargo.quantity - 500).toLocaleString()} excluded`}
+                          className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 cursor-help shrink-0"
+                        >
+                          <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                          <span>上限500 (-{(cargo.quantity - 500).toLocaleString()})</span>
+                        </span>
+                      )}
 
                       <button
                         onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
@@ -805,6 +1134,24 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       >
                         <ShieldAlert className="w-3 h-3" />
                         <span>{isJa ? `割れ物:${cargo.fragile ? '有' : '無'}` : `Fragile:${cargo.fragile ? 'YES' : 'NO'}`}</span>
+                      </button>
+
+                      {/* Floor Placement Toggle */}
+                      <button
+                        type="button"
+                        id={`toggle-floor-${cargo.id}`}
+                        onClick={() => handleUpdateItem(cargo.id, { 
+                          floorPlacement: !cargo.floorPlacement 
+                        })}
+                        title={isJa ? 'クリックで床置き指定(必ずコンテナ床面 z=0 に配置)を切替' : 'Toggle floor placement (must be placed on container floor z=0)'}
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors flex items-center gap-1 border ${
+                          cargo.floorPlacement
+                            ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 font-bold'
+                            : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                        }`}
+                      >
+                        <ArrowDownToLine className="w-3 h-3" />
+                        <span>{isJa ? `床置き:${cargo.floorPlacement ? '要' : '否'}` : `Floor:${cargo.floorPlacement ? 'YES' : 'NO'}`}</span>
                       </button>
                     </div>
                   </div>
@@ -882,7 +1229,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] text-slate-500 font-medium">{isJa ? '色:' : 'Color:'}</span>
                         {COLOR_PALETTE.slice(0, 10).map(c => (
@@ -896,7 +1243,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                         ))}
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2.5 flex-wrap">
                         <label className="flex items-center gap-1 cursor-pointer text-[10px] text-slate-700 font-medium">
                           <input
                             type="checkbox"
@@ -921,6 +1268,20 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                             className="rounded border-slate-300 text-red-600 focus:ring-red-500 text-xs"
                           />
                           <span>{isJa ? '割れ物' : 'Fragile'}</span>
+                        </label>
+                        <label className="flex items-center gap-1 cursor-pointer text-[10px] text-amber-800 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                          <input
+                            type="checkbox"
+                            checked={!!cargo.floorPlacement}
+                            onChange={e => handleUpdateItem(cargo.id, { 
+                              floorPlacement: e.target.checked
+                            })}
+                            className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 text-xs"
+                          />
+                          <span className="flex items-center gap-0.5">
+                            <ArrowDownToLine className="w-2.5 h-2.5 text-amber-700" />
+                            {isJa ? '床置き' : 'Floor'}
+                          </span>
                         </label>
                       </div>
                     </div>

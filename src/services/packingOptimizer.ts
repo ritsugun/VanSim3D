@@ -102,9 +102,12 @@ function checkCollision(
  * and no items directly beneath it are fragile or exceeding their maxStackWeight.
  */
 function checkSupportAndStacking(
-  cand: { x: number; y: number; z: number; length: number; width: number; height: number; weight: number },
+  cand: { x: number; y: number; z: number; length: number; width: number; height: number; weight: number; floorPlacement?: boolean },
   placedItems: PackedItem[]
 ): boolean {
+  if (cand.floorPlacement && cand.z !== 0) {
+    return false; // Floor Placement constraint: Must be placed directly on container floor (z = 0)
+  }
   if (cand.z === 0) return true; // Direct floor support (100% supported by container floor)
 
   const candBaseArea = cand.length * cand.width;
@@ -292,6 +295,7 @@ function packSingleContainerWithGenes(
     }
 
     const orientations = getValidOrientations(safeCargo, gene.preferredRotation);
+    const isFloorOnly = safeCargo.floorPlacement === true;
     let bestPlacement: {
       point: Point3D;
       orientation: BoxOrientation;
@@ -302,6 +306,11 @@ function packSingleContainerWithGenes(
 
     for (let pIdx = 0; pIdx < pointsToTest.length; pIdx++) {
       const pt = pointsToTest[pIdx];
+
+      // Floor placement constraint: if cargo must be on floor, only consider z = 0 positions
+      if (isFloorOnly && pt.z !== 0) {
+        continue;
+      }
 
       for (let oIdx = 0; oIdx < orientations.length; oIdx++) {
         const ori = orientations[oIdx];
@@ -321,7 +330,8 @@ function packSingleContainerWithGenes(
           length: ori.length,
           width: ori.width,
           height: ori.height,
-          weight: safeCargo.weight
+          weight: safeCargo.weight,
+          floorPlacement: isFloorOnly
         };
 
         if (checkCollision(candidate, packedItems)) {
@@ -364,6 +374,7 @@ function packSingleContainerWithGenes(
         weight: safeCargo.weight,
         color: safeCargo.color,
         fragile: !!safeCargo.fragile,
+        floorPlacement: isFloorOnly,
         sequenceNumber: startSequenceNumber + packedItems.length + 1,
         stepIndex: packedItems.length,
         rotationIndex: orientation.rotationIndex,
@@ -659,6 +670,7 @@ function packSingleContainerBlockBuilding(
     if (availableForGroup.length === 0) continue;
 
     const sampleItem = availableForGroup[0].item;
+    const isFloorOnly = sampleItem.floorPlacement === true;
     const orientations = getValidOrientations(sampleItem, 0);
 
     // Keep building blocks while we have enough items
@@ -692,7 +704,8 @@ function packSingleContainerBlockBuilding(
       for (const ori of orientations) {
         const maxNx = Math.min(10, Math.floor(safeContainer.length / ori.length));
         const maxNy = Math.min(10, Math.floor(safeContainer.width / ori.width));
-        const maxNz = Math.min(10, Math.floor(safeContainer.height / ori.height));
+        // If item must be on the floor, block height in items must be 1 (nz = 1) and placed at z = 0
+        const maxNz = isFloorOnly ? 1 : Math.min(10, Math.floor(safeContainer.height / ori.height));
 
         for (let nz = 1; nz <= maxNz; nz++) {
           for (let nx = 1; nx <= maxNx; nx++) {
@@ -709,6 +722,7 @@ function packSingleContainerBlockBuilding(
 
               // Check if this block fits anywhere in extreme points
               for (const pt of extremePoints) {
+                if (isFloorOnly && pt.z !== 0) continue;
                 if (pt.x + bL > safeContainer.length || pt.y + bW > safeContainer.width || pt.z + bH > safeContainer.height) {
                   continue;
                 }
@@ -720,7 +734,8 @@ function packSingleContainerBlockBuilding(
                   length: bL,
                   width: bW,
                   height: bH,
-                  weight: bWeight
+                  weight: bWeight,
+                  floorPlacement: isFloorOnly
                 };
 
                 if (checkCollision(cand, packedItems)) continue;
@@ -777,6 +792,7 @@ function packSingleContainerBlockBuilding(
                 weight: sampleItem.weight,
                 color: sampleItem.color || '#3b82f6',
                 fragile: !!sampleItem.fragile,
+                floorPlacement: isFloorOnly,
                 sequenceNumber: startSequenceNumber + packedItems.length + 1,
                 stepIndex: packedItems.length,
                 rotationIndex: ori.rotationIndex,
@@ -805,10 +821,16 @@ function packSingleContainerBlockBuilding(
 
   // Phase 2: Place any remaining loose/odd individual items with Extreme Points
   const remainingLooseInstances = availableInstances.filter(i => remainingInstanceSet.has(i.instanceId));
-  remainingLooseInstances.sort((a, b) => b.volume - a.volume);
+  remainingLooseInstances.sort((a, b) => {
+    const aF = a.item.floorPlacement ? 0 : 1;
+    const bF = b.item.floorPlacement ? 0 : 1;
+    if (aF !== bF) return aF - bF;
+    return b.volume - a.volume;
+  });
 
   for (const inst of remainingLooseInstances) {
     const cargo = inst.item;
+    const isFloorOnly = cargo.floorPlacement === true;
     if (currentTotalWeight + cargo.weight > safeContainer.maxWeight) continue;
 
     const orientations = getValidOrientations(cargo, 0);
@@ -820,6 +842,7 @@ function packSingleContainerBlockBuilding(
 
     let placed = false;
     for (const pt of extremePoints) {
+      if (isFloorOnly && pt.z !== 0) continue;
       for (const ori of orientations) {
         if (pt.x + ori.length > safeContainer.length || pt.y + ori.width > safeContainer.width || pt.z + ori.height > safeContainer.height) {
           continue;
@@ -832,7 +855,8 @@ function packSingleContainerBlockBuilding(
           length: ori.length,
           width: ori.width,
           height: ori.height,
-          weight: cargo.weight
+          weight: cargo.weight,
+          floorPlacement: isFloorOnly
         };
 
         if (checkCollision(cand, packedItems)) continue;
@@ -852,6 +876,7 @@ function packSingleContainerBlockBuilding(
           weight: cargo.weight,
           color: cargo.color || '#3b82f6',
           fragile: !!cargo.fragile,
+          floorPlacement: isFloorOnly,
           sequenceNumber: startSequenceNumber + packedItems.length + 1,
           stepIndex: packedItems.length,
           rotationIndex: ori.rotationIndex,
@@ -1025,6 +1050,7 @@ function packSingleContainerBeamSearch(
         if (state.currentTotalWeight + cargo.weight > safeContainer.maxWeight) continue;
 
         const orientations = getValidOrientations(cargo, 0);
+        const isFloorOnly = cargo.floorPlacement === true;
 
         // Sort extreme points
         const sortedPoints = [...state.extremePoints].sort((a, b) => {
@@ -1036,6 +1062,7 @@ function packSingleContainerBeamSearch(
         // Test top 12 extreme points
         for (let pIdx = 0; pIdx < Math.min(12, sortedPoints.length); pIdx++) {
           const pt = sortedPoints[pIdx];
+          if (isFloorOnly && pt.z !== 0) continue;
 
           for (const ori of orientations) {
             if (pt.x + ori.length > safeContainer.length || pt.y + ori.width > safeContainer.width || pt.z + ori.height > safeContainer.height) {
@@ -1049,7 +1076,8 @@ function packSingleContainerBeamSearch(
               length: ori.length,
               width: ori.width,
               height: ori.height,
-              weight: cargo.weight
+              weight: cargo.weight,
+              floorPlacement: isFloorOnly
             };
 
             if (checkCollision(cand, state.packedItems)) continue;
@@ -1070,6 +1098,7 @@ function packSingleContainerBeamSearch(
               weight: cargo.weight,
               color: cargo.color || '#3b82f6',
               fragile: !!cargo.fragile,
+              floorPlacement: isFloorOnly,
               sequenceNumber: startSequenceNumber + state.packedItems.length + 1,
               stepIndex: state.packedItems.length,
               rotationIndex: ori.rotationIndex,
@@ -1389,36 +1418,43 @@ function packSingleContainerGA(
     ? 35 
     : (nItems > 100 ? 120 : 180);
 
-  // 1. Generate diverse initial seed individuals
+  // 1. Generate diverse initial seed individuals (prioritizing floorPlacement on the bottom layer)
   const seedChromosomes: GAGene[][] = [];
+  const floorFirst = (a: UnpackedInstance, b: UnpackedInstance) => {
+    const aF = a.item.floorPlacement ? 0 : 1;
+    const bF = b.item.floorPlacement ? 0 : 1;
+    return aF - bF;
+  };
 
   // Seed 1: Volume Descending (BFD) - Upright
   const seed1: GAGene[] = [...availableInstances]
-    .sort((a, b) => b.volume - a.volume || b.item.weight - a.item.weight)
+    .sort((a, b) => floorFirst(a, b) || b.volume - a.volume || b.item.weight - a.item.weight)
     .map(inst => ({ instance: inst, preferredRotation: 0 }));
   seedChromosomes.push(seed1);
 
   // Seed 2: Volume Descending - Rotated
   const seed2: GAGene[] = [...availableInstances]
-    .sort((a, b) => b.volume - a.volume || b.item.weight - a.item.weight)
+    .sort((a, b) => floorFirst(a, b) || b.volume - a.volume || b.item.weight - a.item.weight)
     .map(inst => ({ instance: inst, preferredRotation: 1 }));
   seedChromosomes.push(seed2);
 
   // Seed 3: Weight Descending (Heavy first)
   const seed3: GAGene[] = [...availableInstances]
-    .sort((a, b) => b.item.weight - a.item.weight || b.volume - a.volume)
+    .sort((a, b) => floorFirst(a, b) || b.item.weight - a.item.weight || b.volume - a.volume)
     .map(inst => ({ instance: inst, preferredRotation: 0 }));
   seedChromosomes.push(seed3);
 
   // Seed 4: Base Footprint Descending (Stable Floor)
   const seed4: GAGene[] = [...availableInstances]
-    .sort((a, b) => (b.baseArea - a.baseArea) || (b.item.weight - a.item.weight))
+    .sort((a, b) => floorFirst(a, b) || (b.baseArea - a.baseArea) || (b.item.weight - a.item.weight))
     .map(inst => ({ instance: inst, preferredRotation: 0 }));
   seedChromosomes.push(seed4);
 
   // Seed 5: Wall Building Order (Grouped by length / type)
   const seed5: GAGene[] = [...availableInstances]
     .sort((a, b) => {
+      const f = floorFirst(a, b);
+      if (f !== 0) return f;
       if (a.item.name !== b.item.name) return a.item.name.localeCompare(b.item.name);
       return b.volume - a.volume;
     })
@@ -1427,7 +1463,7 @@ function packSingleContainerGA(
 
   // Seed 6: Layer Stacking (Height grouped)
   const seed6: GAGene[] = [...availableInstances]
-    .sort((a, b) => (b.item.height - a.item.height) || (b.baseArea - a.baseArea))
+    .sort((a, b) => floorFirst(a, b) || (b.item.height - a.item.height) || (b.baseArea - a.baseArea))
     .map(inst => ({ instance: inst, preferredRotation: 0 }));
   seedChromosomes.push(seed6);
 
@@ -1544,6 +1580,8 @@ function packSingleContainerGA(
   return finalResult;
 }
 
+export const MAX_QTY_PER_ITEM = 500;
+
 /**
  * Multi-Container 3D Packing Optimization Engine
  */
@@ -1573,12 +1611,39 @@ export function run3DPackingOptimizer(
   // Expand all active/enabled items based on quantity
   const instances: UnpackedInstance[] = [];
   const activeCargoList = cargoList.filter(cargo => cargo.enabled !== false);
+  
+  let safetyLimitTruncatedCount = 0;
+  let rawTotalItemCount = 0;
+  const truncatedItems: {
+    cargoId: string;
+    name: string;
+    sku: string;
+    requestedQty: number;
+    cappedQty: number;
+    truncatedQty: number;
+  }[] = [];
+
   activeCargoList.forEach((cargo) => {
     const cL = Math.max(10, Number(cargo.length) || 100);
     const cW = Math.max(10, Number(cargo.width) || 100);
     const cH = Math.max(10, Number(cargo.height) || 100);
     const cWt = Math.max(0.1, Number(cargo.weight) || 1);
-    const cQty = Math.max(0, Math.min(500, Number(cargo.quantity) || 0));
+    const rawQty = Math.max(0, Number(cargo.quantity) || 0);
+    rawTotalItemCount += rawQty;
+    const cQty = Math.min(MAX_QTY_PER_ITEM, rawQty);
+
+    if (rawQty > MAX_QTY_PER_ITEM) {
+      const diff = rawQty - MAX_QTY_PER_ITEM;
+      safetyLimitTruncatedCount += diff;
+      truncatedItems.push({
+        cargoId: cargo.id,
+        name: cargo.name || cargo.sku || 'Cargo',
+        sku: cargo.sku || '',
+        requestedQty: rawQty,
+        cappedQty: MAX_QTY_PER_ITEM,
+        truncatedQty: diff
+      });
+    }
 
     const sanitizedCargo = {
       ...cargo,
@@ -1601,9 +1666,18 @@ export function run3DPackingOptimizer(
     }
   });
 
+  // Helper: Prioritize floor placement items so they secure floor space (z = 0)
+  const compareFloorFirst = (a: UnpackedInstance, b: UnpackedInstance) => {
+    const aF = a.item.floorPlacement ? 0 : 1;
+    const bF = b.item.floorPlacement ? 0 : 1;
+    return aF - bF;
+  };
+
   // Sorting heuristics based on algorithm
   if (algorithm === 'weight_balanced') {
     instances.sort((a, b) => {
+      const f = compareFloorFirst(a, b);
+      if (f !== 0) return f;
       if ((a.item.priority || 3) !== (b.item.priority || 3)) {
         return (a.item.priority || 3) - (b.item.priority || 3);
       }
@@ -1614,6 +1688,8 @@ export function run3DPackingOptimizer(
     });
   } else if (algorithm === 'wall_building') {
     instances.sort((a, b) => {
+      const f = compareFloorFirst(a, b);
+      if (f !== 0) return f;
       if ((a.item.priority || 3) !== (b.item.priority || 3)) {
         return (a.item.priority || 3) - (b.item.priority || 3);
       }
@@ -1624,14 +1700,18 @@ export function run3DPackingOptimizer(
     });
   } else if (algorithm === 'layer_stacking') {
     instances.sort((a, b) => {
+      const f = compareFloorFirst(a, b);
+      if (f !== 0) return f;
       if (b.item.height !== a.item.height) {
         return b.item.height - a.item.height;
       }
       return b.baseArea - a.baseArea;
     });
   } else if (algorithm === 'block_building') {
-    // Group identical items together, largest volume first
+    // Group identical items together, largest volume first, floor-only groups first
     instances.sort((a, b) => {
+      const f = compareFloorFirst(a, b);
+      if (f !== 0) return f;
       if (a.item.id !== b.item.id) {
         return b.volume - a.volume;
       }
@@ -1640,6 +1720,8 @@ export function run3DPackingOptimizer(
   } else if (algorithm === 'beam_search') {
     // Sort by volume descending with base area tie-breaker
     instances.sort((a, b) => {
+      const f = compareFloorFirst(a, b);
+      if (f !== 0) return f;
       if ((a.item.priority || 3) !== (b.item.priority || 3)) {
         return (a.item.priority || 3) - (b.item.priority || 3);
       }
@@ -1653,6 +1735,8 @@ export function run3DPackingOptimizer(
   } else {
     // Extreme Points Best-Fit Decreasing (Default)
     instances.sort((a, b) => {
+      const f = compareFloorFirst(a, b);
+      if (f !== 0) return f;
       if ((a.item.priority || 3) !== (b.item.priority || 3)) {
         return (a.item.priority || 3) - (b.item.priority || 3);
       }
@@ -1753,6 +1837,8 @@ export function run3DPackingOptimizer(
     overallWeightUtilization: totalCapacityWeightKg > 0 ? (totalPackedWeightKg / totalCapacityWeightKg) * 100 : 0,
     totalItemCount,
     totalItemsCount: totalItemCount,
+    rawTotalItemCount,
+    safetyLimitTruncatedCount,
     totalPackedCount,
     totalUnplacedCount,
     totalCostEstimate: containerLoads.length * (safeContainer.costEstimate || 2000)
@@ -1763,6 +1849,8 @@ export function run3DPackingOptimizer(
     ...containerLoads[0].metrics,
     calculationTimeMs,
     totalItemCount,
+    rawTotalItemCount,
+    safetyLimitTruncatedCount,
     packedCount: totalPackedCount,
     unplacedCount: totalUnplacedCount,
     containersNeeded: containerLoads.length + (totalUnplacedCount > 0 ? 1 : 0)
@@ -1774,7 +1862,10 @@ export function run3DPackingOptimizer(
     packedItems: allPackedItems,
     unplacedItems,
     metrics: primaryMetrics,
-    overallMetrics
+    overallMetrics,
+    rawTotalItemCount,
+    safetyLimitTruncatedCount,
+    truncatedItems
   };
 }
 
@@ -1923,7 +2014,9 @@ export function runAllAlgorithmsBenchmark(
     }
   ];
 
-  const totalItemCount = cargoList.reduce((s, c) => s + c.quantity, 0);
+  const targetItemCount = cargoList
+    .filter(c => c.enabled !== false)
+    .reduce((s, c) => s + Math.min(MAX_QTY_PER_ITEM, Math.max(0, Number(c.quantity) || 0)), 0);
 
   // Run calculation for all configurations with fast benchmark mode
   const rawResults = configs.map(cfg => {
@@ -1943,7 +2036,7 @@ export function runAllAlgorithmsBenchmark(
     // 1. Volume utilization: up to 45 pts
     const volumePts = Math.min(45, (volumeUtilization / 100) * 45);
     // 2. Unplaced penalty: subtract up to 40 pts if items are missing
-    const unplacedPenalty = totalItemCount > 0 ? (unplacedCount / totalItemCount) * 40 : 0;
+    const unplacedPenalty = targetItemCount > 0 ? (unplacedCount / targetItemCount) * 40 : 0;
     // 3. Container efficiency: up to 20 pts
     const containerPts = 20 / Math.max(1, containersCount);
     // 4. CoG stability: up to 25 pts
@@ -1964,7 +2057,7 @@ export function runAllAlgorithmsBenchmark(
       containersCount,
       unplacedCount,
       packedCount,
-      totalItemsCount: totalItemCount,
+      totalItemsCount: targetItemCount,
       cogOffsetX: Math.round(result.metrics.centerOfGravity.offsetXPercent * 10) / 10,
       cogOffsetY: Math.round(result.metrics.centerOfGravity.offsetYPercent * 10) / 10,
       cogStabilityScore,

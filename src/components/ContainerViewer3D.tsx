@@ -5,7 +5,8 @@ import { Container, PackedItem, UnitSystem, Language, ContainerLoad } from '../t
 import { 
   Play, Pause, SkipBack, SkipForward, RotateCcw, 
   Layers, Camera, Maximize2, ShieldAlert, 
-  Compass, Crosshair, SlidersHorizontal, Box, Grid3X3, X
+  Compass, Crosshair, SlidersHorizontal, Box, Grid3X3, X,
+  GripVertical, Blend
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 
@@ -74,6 +75,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [showCoG, setShowCoG] = useState<boolean>(true);
   const [showWireframeOnly, setShowWireframeOnly] = useState<boolean>(false);
+  const [isTranslucent, setIsTranslucent] = useState<boolean>(true); // Default to true per user request: "貨物の見え方を半透明にしたい。"
+  const [cargoOpacity, setCargoOpacity] = useState<number>(65); // 65% opacity
   const [colorMode, setColorMode] = useState<'cargo' | 'weight' | 'sequence'>('cargo');
   const [activeCameraView, setActiveCameraView] = useState<'iso' | 'top' | 'side' | 'door'>('iso');
   const [showSliceControls, setShowSliceControls] = useState<boolean>(false);
@@ -82,6 +85,92 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [hoveredItem, setHoveredItem] = useState<PackedItem | null>(null);
   const [internalSelectedItem, setInternalSelectedItem] = useState<PackedItem | null>(null);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+
+  // Drag-and-drop state for floating Controls panel
+  const viewerWrapperRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const dragStartOffset = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Handle Drag Start
+  const handlePanelDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    // Avoid dragging when clicking inside interactive elements like buttons, inputs, selects
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('a')) {
+      return;
+    }
+
+    if (!panelRef.current || !viewerWrapperRef.current) return;
+
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+
+    const panelRect = panelRef.current.getBoundingClientRect();
+    const wrapperRect = viewerWrapperRef.current.getBoundingClientRect();
+
+    dragStartOffset.current = {
+      x: clientX - panelRect.left,
+      y: clientY - panelRect.top,
+    };
+
+    if (!panelPos) {
+      setPanelPos({
+        x: panelRect.left - wrapperRect.left,
+        y: panelRect.top - wrapperRect.top,
+      });
+    }
+
+    setIsDragging(true);
+  };
+
+  // Window-level mouse/touch move & up listeners for smooth non-blocking dragging
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      if (!viewerWrapperRef.current || !panelRef.current) return;
+
+      const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
+      const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
+
+      const wrapperRect = viewerWrapperRef.current.getBoundingClientRect();
+      const panelWidth = panelRef.current.offsetWidth || 288;
+      const panelHeight = panelRef.current.offsetHeight || 420;
+
+      let newX = clientX - wrapperRect.left - dragStartOffset.current.x;
+      let newY = clientY - wrapperRect.top - dragStartOffset.current.y;
+
+      // Bound clamping inside viewer with 8px margin
+      const minX = 8;
+      const maxX = Math.max(minX, wrapperRect.width - panelWidth - 8);
+      const minY = 8;
+      const maxY = Math.max(minY, wrapperRect.height - panelHeight - 8);
+
+      newX = Math.max(minX, Math.min(newX, maxX));
+      newY = Math.max(minY, Math.min(newY, maxY));
+
+      setPanelPos({ x: newX, y: newY });
+    };
+
+    const handlePointerUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('touchend', handlePointerUp);
+    window.addEventListener('touchcancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
+      window.removeEventListener('touchcancel', handlePointerUp);
+    };
+  }, [isDragging]);
 
   const activeSelectedItem = externalSelectedItem || internalSelectedItem;
 
@@ -389,14 +478,29 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         boxColor = boxColor.clone().offsetHSL(0, 0, 0.15);
       }
 
+      const isSemiTransparent = isTranslucent && cargoOpacity < 100;
+      let effectiveOpacity = 1.0;
+      if (isSemiTransparent) {
+        if (isSelected) {
+          effectiveOpacity = 0.95;
+        } else if (isHovered) {
+          effectiveOpacity = Math.min(1.0, (cargoOpacity / 100) + 0.25);
+        } else {
+          effectiveOpacity = cargoOpacity / 100;
+        }
+      } else {
+        effectiveOpacity = (isHovered || isSelected) ? 0.92 : 1.0;
+      }
+
       const boxGeo = new THREE.BoxGeometry(lenM, heiM, widM);
       const boxMat = new THREE.MeshStandardMaterial({
         color: boxColor,
-        roughness: 0.4,
-        metalness: 0.1,
+        roughness: 0.35,
+        metalness: 0.05,
         wireframe: showWireframeOnly,
-        transparent: isHovered || isSelected,
-        opacity: isHovered || isSelected ? 0.92 : 1.0
+        transparent: isSemiTransparent || isHovered || isSelected,
+        opacity: effectiveOpacity,
+        depthWrite: !isSemiTransparent,
       });
 
       const mesh = new THREE.Mesh(boxGeo, boxMat);
@@ -415,7 +519,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const edgesGeo = new THREE.EdgesGeometry(boxGeo);
       const edgeLineMat = new THREE.LineBasicMaterial({
         color: isSelected ? 0x000000 : 0x1e293b,
-        linewidth: isSelected ? 3 : 1
+        linewidth: isSelected ? 3 : 1,
+        transparent: isSemiTransparent,
+        opacity: isSemiTransparent ? 0.85 : 1.0
       });
       const edgeLines = new THREE.LineSegments(edgesGeo, edgeLineMat);
       mesh.add(edgeLines);
@@ -425,6 +531,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     });
   }, [
     activeItemsToDisplay, currentStep, colorMode, showWireframeOnly, 
+    isTranslucent, cargoOpacity,
     zSlicePercent, xSlicePercent, hoveredItem, activeSelectedItem, 
     maxItemWeight, container, currentTab, containers, sceneReady
   ]);
@@ -652,6 +759,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
   return (
     <div 
+      ref={viewerWrapperRef}
       id="container-viewer-3d-root" 
       className={`relative flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs text-slate-800 ${
         isFullScreen ? 'fixed inset-0 z-50 rounded-none' : 'w-full h-full min-h-[580px]'
@@ -729,6 +837,26 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
         {/* Top-Right Viewer Toolbar */}
         <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-lg border border-slate-200 shadow-sm text-xs">
+          {/* Semi-transparent toggle button */}
+          <button
+            id="toggle-translucent-btn"
+            onClick={() => setIsTranslucent(!isTranslucent)}
+            title={isJa ? (isTranslucent ? '貨物の半透明表示を解除 (100%不透明にする)' : '貨物の見え方を半透明にする (奥・内部の貨物まで透過可視化)') : (isTranslucent ? 'Disable Translucent View (make opaque)' : 'Make Cargo Translucent (X-Ray view)')}
+            className={`px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-1.5 font-bold ${
+              isTranslucent 
+                ? 'bg-indigo-600 text-white shadow-2xs' 
+                : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <Blend className="w-3.5 h-3.5" />
+            <span className="text-xs">{isJa ? '半透明' : 'Translucent'}</span>
+            {isTranslucent && (
+              <span className="text-[10px] bg-indigo-700/80 px-1 py-0.2 rounded font-mono font-normal">
+                {cargoOpacity}%
+              </span>
+            )}
+          </button>
+          <div className="w-px h-4 bg-slate-200 mx-0.5" />
           <button
             id="toggle-slice-controls-btn"
             onClick={() => setShowSliceControls(!showSliceControls)}
@@ -841,20 +969,52 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         </div>
       )}
 
-      {/* Layer Slicing, Camera Views & Sequence Player Controls (Floating Right) */}
+      {/* Layer Slicing, Camera Views & Sequence Player Controls (Draggable Floating Panel) */}
       {showSliceControls && (
-        <div className="absolute top-16 right-3 pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs space-y-3.5 z-20 w-72 text-slate-700 animate-fade-in">
-          {/* Header with Title, Reset & Close Button */}
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-900" />
-              {isJa ? '操作・視点コントロール' : 'Controls & Camera Views'}
-            </span>
+        <div 
+          ref={panelRef}
+          style={
+            panelPos
+              ? { top: `${panelPos.y}px`, left: `${panelPos.x}px`, right: 'auto' }
+              : undefined
+          }
+          className={`absolute pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs space-y-3.5 z-20 w-72 text-slate-700 animate-fade-in transition-shadow ${
+            !panelPos ? 'top-16 right-3' : ''
+          } ${isDragging ? 'shadow-2xl ring-2 ring-slate-900/30 select-none opacity-95' : ''}`}
+        >
+          {/* Header with Title, Drag Handle & Close Button */}
+          <div 
+            onMouseDown={handlePanelDragStart}
+            onTouchStart={handlePanelDragStart}
+            className="flex items-center justify-between border-b border-slate-100 pb-2 cursor-grab active:cursor-grabbing select-none group"
+            title={isJa ? 'ドラッグして画面内の好きな位置へ移動できます' : 'Drag to reposition anywhere'}
+          >
             <div className="flex items-center gap-1">
+              <GripVertical className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700 transition-colors shrink-0" />
+              <span className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-900" />
+                {isJa ? '操作・視点コントロール' : 'Controls & Views'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              {panelPos && (
+                <button
+                  id="reset-panel-pos-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPanelPos(null);
+                  }}
+                  title={isJa ? '小窓の位置を初期位置（右上）に戻す' : 'Reset panel position to top-right'}
+                  className="text-[10px] text-slate-500 hover:text-slate-800 font-semibold px-1 py-0.5 rounded hover:bg-slate-100 transition-colors"
+                >
+                  {isJa ? '位置初期化' : 'Reset Pos'}
+                </button>
+              )}
               {(zSlicePercent < 100 || xSlicePercent < 100) && (
                 <button
                   id="reset-slice-btn"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setZSlicePercent(100);
                     setXSlicePercent(100);
                   }}
@@ -866,7 +1026,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               )}
               <button
                 id="close-slice-panel-btn"
-                onClick={() => setShowSliceControls(false)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowSliceControls(false);
+                }}
                 title={isJa ? 'コントロールUIを非表示にする' : 'Hide Controls'}
                 className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100 transition-colors"
               >
@@ -934,13 +1097,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           </div>
 
           {/* 1. Play Load / Loading Simulation Player */}
-          <div className="bg-slate-900 text-white p-2.5 rounded-lg space-y-2">
+          <div className="bg-white border border-slate-300 p-2.5 rounded-lg space-y-2 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold flex items-center gap-1 text-slate-200">
-                <Play className="w-3 h-3 text-white fill-current" />
+              <span className="text-[11px] font-bold flex items-center gap-1.5 text-slate-900">
+                <Play className="w-3.5 h-3.5 text-slate-900 fill-slate-900" />
                 {isJa ? '積載シミュレーション' : 'Loading Sequence'}
               </span>
-              <span className="font-mono text-[11px] text-white font-bold">
+              <span className="font-mono text-[11px] text-slate-900 font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
                 {currentStep} / {activeItemsToDisplay.length}
               </span>
             </div>
@@ -955,7 +1118,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     setCurrentStep(0);
                   }}
                   title={isJa ? '最初に戻る' : 'Reset to Start'}
-                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                  className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-200 transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                 </button>
@@ -967,7 +1130,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   }}
                   disabled={currentStep === 0}
                   title={isJa ? '前の荷物' : 'Previous Step'}
-                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
+                  className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 hover:text-slate-900 border border-slate-200 transition-colors"
                 >
                   <SkipBack className="w-3.5 h-3.5" />
                 </button>
@@ -979,16 +1142,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     }
                     setIsPlaying(!isPlaying);
                   }}
-                  className="px-2.5 py-1.5 rounded bg-white hover:bg-slate-100 text-slate-900 font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs"
+                  className="px-2.5 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs"
                 >
                   {isPlaying ? (
                     <>
-                      <Pause className="w-3.5 h-3.5 text-slate-900" />
+                      <Pause className="w-3.5 h-3.5 text-white" />
                       <span>{isJa ? '停止' : 'Pause'}</span>
                     </>
                   ) : (
                     <>
-                      <Play className="w-3.5 h-3.5 fill-current text-slate-900" />
+                      <Play className="w-3.5 h-3.5 fill-current text-white" />
                       <span>{isJa ? '再生' : 'Play'}</span>
                     </>
                   )}
@@ -1001,19 +1164,23 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   }}
                   disabled={currentStep >= activeItemsToDisplay.length}
                   title={isJa ? '次の荷物' : 'Next Step'}
-                  className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 transition-colors"
+                  className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 hover:text-slate-900 border border-slate-200 transition-colors"
                 >
                   <SkipForward className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {/* Speed Buttons */}
-              <div className="flex items-center bg-slate-800 rounded p-0.5 text-[10px] font-semibold text-slate-300">
+              <div className="flex items-center bg-slate-100 border border-slate-200 rounded p-0.5 text-[10px] font-semibold text-slate-600">
                 {[1, 2, 4].map((speed) => (
                   <button
                     key={speed}
                     onClick={() => setPlaybackSpeed(speed)}
-                    className={`px-1.5 py-0.5 rounded ${playbackSpeed === speed ? 'bg-white text-slate-900 font-bold' : 'hover:text-white'}`}
+                    className={`px-1.5 py-0.5 rounded transition-colors ${
+                      playbackSpeed === speed 
+                        ? 'bg-slate-900 text-white font-bold shadow-xs' 
+                        : 'hover:text-slate-900'
+                    }`}
                   >
                     {speed}x
                   </button>
@@ -1033,7 +1200,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   setIsPlaying(false);
                   setCurrentStep(Number(e.target.value));
                 }}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-white"
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
               />
             </div>
           </div>
@@ -1079,7 +1246,64 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
           </div>
 
-          {/* 3. Color Mode Switcher */}
+          {/* 3. Cargo Transparency (Translucent / Opacity) Controls */}
+          <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold flex items-center gap-1.5 text-slate-800">
+                <Blend className="w-3.5 h-3.5 text-indigo-600" />
+                {isJa ? '貨物の半透明表示' : 'Cargo Translucency'}
+              </span>
+              <button
+                type="button"
+                id="panel-translucent-toggle"
+                onClick={() => setIsTranslucent(!isTranslucent)}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                  isTranslucent
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                }`}
+              >
+                {isTranslucent ? (isJa ? '有効 (ON)' : 'ON') : (isJa ? '無効 (OFF)' : 'OFF')}
+              </button>
+            </div>
+
+            {isTranslucent && (
+              <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
+                <div className="flex items-center justify-between text-[11px] text-slate-600">
+                  <span className="font-medium">{isJa ? '不透明度' : 'Opacity'}:</span>
+                  <span className="font-mono font-bold text-indigo-700">{cargoOpacity}%</span>
+                </div>
+                <input
+                  id="cargo-opacity-slider"
+                  type="range"
+                  min="20"
+                  max="95"
+                  step="5"
+                  value={cargoOpacity}
+                  onChange={(e) => setCargoOpacity(Number(e.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {[30, 50, 65, 85].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setCargoOpacity(val)}
+                      className={`py-0.5 rounded text-[10px] font-medium border text-center transition-colors ${
+                        cargoOpacity === val
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {val}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4. Color Mode Switcher */}
           <div className="border-t border-slate-200 pt-2">
             <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1 font-semibold">
               {isJa ? '配色モード' : 'Color Scheme'}

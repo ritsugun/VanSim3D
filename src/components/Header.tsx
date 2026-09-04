@@ -3,7 +3,7 @@ import { AlgorithmType, GAGoalConfig, Language, UnitSystem, AutoSelectCriteria }
 import { 
   Box, Sparkles, Cpu, Target, Globe, Gauge, 
   RefreshCw, Check, Layers, Scale, Sliders, Zap, Bot,
-  BarChart3, ListOrdered, Truck
+  BarChart3, ListOrdered, Truck, AlertTriangle
 } from 'lucide-react';
 
 export type TabType = '3d' | 'cargo' | 'container' | 'analytics' | 'manifest';
@@ -34,6 +34,8 @@ interface HeaderProps {
   activeTab?: TabType;
   onChangeTab?: (tab: TabType) => void;
   totalItemCount?: number;
+  totalRawItemCount?: number;
+  safetyLimitTruncatedCount?: number;
   containerUnitsCount?: number;
   volumeUtilization?: number;
   packedItemCount?: number;
@@ -62,6 +64,8 @@ export const Header: React.FC<HeaderProps> = ({
   activeTab = '3d',
   onChangeTab,
   totalItemCount = 0,
+  totalRawItemCount = 0,
+  safetyLimitTruncatedCount = 0,
   containerUnitsCount = 1,
   volumeUtilization = 0,
   packedItemCount = 0,
@@ -329,10 +333,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Layers className="w-3 h-3" />
               <span>{isJa ? '貨物・荷物設定' : 'Cargo Items'}</span>
-              <span className={`text-[9px] px-1 py-0.2 rounded-full font-mono font-bold ${
-                activeTab === 'cargo' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'
-              }`}>
-                {totalItemCount}
+              <span 
+                className={`text-[9px] px-1 py-0.2 rounded-full font-mono font-bold inline-flex items-center ${
+                  activeTab === 'cargo' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'
+                }`}
+                title={safetyLimitTruncatedCount > 0 
+                  ? (isJa ? `最適化対象: ${totalItemCount.toLocaleString()} 個 (登録総数: ${totalRawItemCount.toLocaleString()} 個 / 安全リミットで ${safetyLimitTruncatedCount.toLocaleString()} 個除外)` : `Target: ${totalItemCount.toLocaleString()} (Registered: ${totalRawItemCount.toLocaleString()} / Excluded: ${safetyLimitTruncatedCount.toLocaleString()})`)
+                  : undefined
+                }
+              >
+                {totalItemCount.toLocaleString()}
+                {safetyLimitTruncatedCount > 0 && <span className="text-amber-400 font-bold ml-0.5">*</span>}
               </span>
             </button>
 
@@ -396,7 +407,19 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-slate-300">|</span>
             <span>
               {isJa ? '積載:' : 'Packed:'}{' '}
-              <strong className="text-slate-900 font-mono font-bold">{packedItemCount} / {totalItemCount}</strong>
+              <strong className="text-slate-900 font-mono font-bold">{packedItemCount.toLocaleString()} / {totalItemCount.toLocaleString()}</strong>
+              {safetyLimitTruncatedCount > 0 && (
+                <span 
+                  id="header-safety-limit-badge"
+                  title={isJa 
+                    ? `安全リミット警告: 各品目最大500個の上限により、${safetyLimitTruncatedCount.toLocaleString()}個の貨物が計算から除外されています（登録総数: ${totalRawItemCount.toLocaleString()}個 / 最適化計算対象数: ${totalItemCount.toLocaleString()}個）` 
+                    : `Safety limit: ${safetyLimitTruncatedCount.toLocaleString()} items excluded by max 500 units/item limit (Registered: ${totalRawItemCount.toLocaleString()} / Calculation target: ${totalItemCount.toLocaleString()})`}
+                  className="ml-1.5 text-amber-800 bg-amber-100 border border-amber-300 text-[10px] px-1.5 py-0.5 rounded font-bold cursor-help inline-flex items-center gap-0.5"
+                >
+                  <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                  <span>{isJa ? `-${safetyLimitTruncatedCount.toLocaleString()}除外` : `-${safetyLimitTruncatedCount.toLocaleString()} capped`}</span>
+                </span>
+              )}
             </span>
             <span className="text-slate-300">|</span>
             <span>

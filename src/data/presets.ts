@@ -53,58 +53,58 @@ export const STANDARD_CONTAINERS: Container[] = [
     color: '#4338ca', // Indigo
     description: '45ft high-capacity container used for international intermodal routes with maximum CBM capacity (86 m³).'
   },
-  {
-    id: '53trailer',
-    name: '53ft Semi-Trailer (Dry Van)',
-    category: 'truck',
-    length: 16000, // mm
-    width: 2480,  // mm
-    height: 2740, // mm
-    maxWeight: 24000, // kg payload
-    tareWeight: 6200, // kg
-    costEstimate: 2800,
-    color: '#b45309', // Amber / Brown
-    description: 'Standard North American 53ft highway dry van trailer with high volume capacity (108 m³).'
-  },
-  {
-    id: '10t_truck',
-    name: '10-Ton Heavy Logistics Truck (10t 大型車)',
-    category: 'truck',
-    length: 9400, // mm
-    width: 2350,  // mm
-    height: 2400, // mm
-    maxWeight: 10000, // kg payload
-    tareWeight: 9800, // kg
-    costEstimate: 1200,
-    color: '#dc2626', // Red
-    description: 'Japanese standard 10-ton wing/van heavy freight truck for domestic linehaul transport.'
-  },
-  {
-    id: '4t_truck',
-    name: '4-Ton Medium Freight Truck (4t 中型車)',
-    category: 'truck',
-    length: 6200, // mm
-    width: 2150,  // mm
-    height: 2200, // mm
-    maxWeight: 4000, // kg payload
-    tareWeight: 4100, // kg
-    costEstimate: 750,
-    color: '#ea580c', // Orange
-    description: 'Versatile 4-ton freight truck for urban and regional multi-stop distribution.'
-  },
-  {
-    id: 'eur_pallet',
-    name: 'Euro Pallet (EUR-1 1200x800)',
-    category: 'pallet',
-    length: 1200, // mm
-    width: 800,   // mm
-    height: 1600, // mm max load height
-    maxWeight: 1500, // kg payload
-    tareWeight: 25,   // kg
-    costEstimate: 60,
-    color: '#854d0e', // Wooden
-    description: 'Standard European pallet base unit load calculation.'
-  },
+  // {
+  //   id: '53trailer',
+  //   name: '53ft Semi-Trailer (Dry Van)',
+  //   category: 'truck',
+  //   length: 16000, // mm
+  //   width: 2480,  // mm
+  //   height: 2740, // mm
+  //   maxWeight: 24000, // kg payload
+  //   tareWeight: 6200, // kg
+  //   costEstimate: 2800,
+  //   color: '#b45309', // Amber / Brown
+  //   description: 'Standard North American 53ft highway dry van trailer with high volume capacity (108 m³).'
+  // },
+  // {
+  //   id: '10t_truck',
+  //   name: '10-Ton Heavy Logistics Truck (10t 大型車)',
+  //   category: 'truck',
+  //   length: 9400, // mm
+  //   width: 2350,  // mm
+  //   height: 2400, // mm
+  //   maxWeight: 10000, // kg payload
+  //   tareWeight: 9800, // kg
+  //   costEstimate: 1200,
+  //   color: '#dc2626', // Red
+  //   description: 'Japanese standard 10-ton wing/van heavy freight truck for domestic linehaul transport.'
+  // },
+  // {
+  //   id: '4t_truck',
+  //   name: '4-Ton Medium Freight Truck (4t 中型車)',
+  //   category: 'truck',
+  //   length: 6200, // mm
+  //   width: 2150,  // mm
+  //   height: 2200, // mm
+  //   maxWeight: 4000, // kg payload
+  //   tareWeight: 4100, // kg
+  //   costEstimate: 750,
+  //   color: '#ea580c', // Orange
+  //   description: 'Versatile 4-ton freight truck for urban and regional multi-stop distribution.'
+  // },
+  // {
+  //   id: 'eur_pallet',
+  //   name: 'Euro Pallet (EUR-1 1200x800)',
+  //   category: 'pallet',
+  //   length: 1200, // mm
+  //   width: 800,   // mm
+  //   height: 1600, // mm max load height
+  //   maxWeight: 1500, // kg payload
+  //   tareWeight: 25,   // kg
+  //   costEstimate: 60,
+  //   color: '#854d0e', // Wooden
+  //   description: 'Standard European pallet base unit load calculation.'
+  // },
   {
     id: 'us_pallet',
     name: 'US Industrial Pallet (GMA 1219x1016)',
@@ -693,16 +693,16 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
   }
 ];
 
-export const SAMPLE_CSV_TEMPLATE = `貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0)
-CMB-M108V-KB1,1100,1230,700,125,1,1,#ef4444,0
-PURY-P350YNW-A2,1270,1920,760,292,5,1,#f97316,1
-PURY-M200YNW-A1,950,1920,760,244,2,1,#ec4899,1
-CMB-M104V-J1,1070,380,700,32,2,1,#3b82f6,0
-CMB-M104V-KB1,1100,1230,700,101,1,1,#14b8a6,0
-CMB-M104V-KB1,1070,380,700,29,2,1,#6366f1,0
-CMB-M106V-J1,1070,380,700,35,5,1,#d97706,0
-CMB-M108V-J1,1070,380,700,39,5,1,#059669,0
-CMB-M108V-KB1,1100,1230,700,125,3,1,#4f46e5,0
-CMB-M108V-KB1,1070,380,700,37,1,1,#e11d48,0
-CMB-M1012V-J1,1380,380,840,58,10,1,#0284c7,0
-CMB-M1012V-MA-SV,1750,390,1150,94,5,1,#7c3aed,0`;
+export const SAMPLE_CSV_TEMPLATE = `貨物名,幅(mm),高さ(mm),奥行(mm),重量(kg),個数,横回転許可(1/0),カラー(16進数),割れ物(1/0),床置き(1/0)
+CMB-M108V-KB1,1100,1230,700,125,1,1,#ef4444,0,0
+PURY-P350YNW-A2,1270,1920,760,292,5,1,#f97316,1,1
+PURY-M200YNW-A1,950,1920,760,244,2,1,#ec4899,1,1
+CMB-M104V-J1,1070,380,700,32,2,1,#3b82f6,0,0
+CMB-M104V-KB1,1100,1230,700,101,1,1,#14b8a6,0,0
+CMB-M104V-KB1,1070,380,700,29,2,1,#6366f1,0,0
+CMB-M106V-J1,1070,380,700,35,5,1,#d97706,0,0
+CMB-M108V-J1,1070,380,700,39,5,1,#059669,0,0
+CMB-M108V-KB1,1100,1230,700,125,3,1,#4f46e5,0,0
+CMB-M108V-KB1,1070,380,700,37,1,1,#e11d48,0,0
+CMB-M1012V-J1,1380,380,840,58,10,1,#0284c7,0,0
+CMB-M1012V-MA-SV,1750,390,1150,94,5,1,#7c3aed,0,0`;

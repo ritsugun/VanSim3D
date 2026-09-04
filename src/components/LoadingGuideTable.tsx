@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { PackedItem, Language, UnitSystem, Container, ContainerLoad } from '../types';
 import { 
   ClipboardList, Search, Download, Printer, 
-  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box 
+  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box, ArrowDownToLine 
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 
@@ -138,7 +138,8 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
       '重量(kg)',
       '累積重量(kg)',
       '段数(Layer)',
-      '天地無用/割れ物'
+      '天地無用/割れ物',
+      '床置き指定'
     ];
 
     const rows = allPackedItems.map(p => [
@@ -155,7 +156,8 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
       p.weight,
       cumulativeWeights.get(p.sequenceNumber) || p.weight,
       p.layer,
-      p.fragile ? (isJa ? '割れ物' : 'YES') : (isJa ? '通常' : 'NO')
+      p.fragile ? (isJa ? '割れ物' : 'YES') : (isJa ? '通常' : 'NO'),
+      p.floorPlacement ? (isJa ? '床置き' : 'YES') : (isJa ? '通常' : 'NO')
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
@@ -402,6 +404,12 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
                         {item.fragile && (
                           <span title={isJa ? '割れ物・天地無用' : 'Fragile'} className="text-red-500">
                             <ShieldAlert className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        {item.floorPlacement && (
+                          <span title={isJa ? '床置き指定 (床面 z=0)' : 'Floor Placement (z=0)'} className="text-amber-600 bg-amber-50 px-1 py-0.5 rounded text-[9px] font-bold border border-amber-200 flex items-center gap-0.5">
+                            <ArrowDownToLine className="w-2.5 h-2.5" />
+                            <span>{isJa ? '床' : 'Floor'}</span>
                           </span>
                         )}
                       </div>
