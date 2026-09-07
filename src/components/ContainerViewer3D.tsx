@@ -6,9 +6,10 @@ import {
   Play, Pause, SkipBack, SkipForward, RotateCcw, 
   Layers, Camera, Maximize2, ShieldAlert, 
   Compass, Crosshair, SlidersHorizontal, Box, Grid3X3, X,
-  GripVertical, Blend
+  GripVertical, Blend, Sparkles, Palette
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
+import { VIVID_NEON_PALETTE, boostHexToVivid } from '../utils/colors';
 
 interface ContainerViewer3DProps {
   container: Container;
@@ -21,6 +22,7 @@ interface ContainerViewer3DProps {
   language: Language;
   onSelectItem?: (item: PackedItem | null) => void;
   selectedItem?: PackedItem | null;
+  onApplyVividColors?: (paletteId?: any) => void;
 }
 
 export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
@@ -33,7 +35,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   unitSystem,
   language,
   onSelectItem,
-  selectedItem: externalSelectedItem
+  selectedItem: externalSelectedItem,
+  onApplyVividColors
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -75,9 +78,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [showCoG, setShowCoG] = useState<boolean>(true);
   const [showWireframeOnly, setShowWireframeOnly] = useState<boolean>(false);
-  const [isTranslucent, setIsTranslucent] = useState<boolean>(true); // Default to true per user request: "貨物の見え方を半透明にしたい。"
-  const [cargoOpacity, setCargoOpacity] = useState<number>(65); // 65% opacity
-  const [colorMode, setColorMode] = useState<'cargo' | 'weight' | 'sequence'>('cargo');
+  const [isTranslucent, setIsTranslucent] = useState<boolean>(false); // Default to false (100% opaque) per user request: "貨物透明度の初期値は１００％不透明にして"
+  const [cargoOpacity, setCargoOpacity] = useState<number>(100); // 100% opaque default
+  const [colorMode, setColorMode] = useState<'cargo' | 'vivid' | 'weight' | 'sequence'>('cargo');
+  const [isVividBoost, setIsVividBoost] = useState<boolean>(true); // High vibrancy and emissive boost
   const [activeCameraView, setActiveCameraView] = useState<'iso' | 'top' | 'side' | 'door'>('iso');
   const [showSliceControls, setShowSliceControls] = useState<boolean>(false);
   const [zSlicePercent, setZSlicePercent] = useState<number>(100);
@@ -462,20 +466,26 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const isSelected = activeSelectedItem?.id === item.id;
       const isHovered = hoveredItem?.id === item.id;
 
-      // Color mapping
+      // Color mapping with high-saturation vivid mode support
       let boxColor = new THREE.Color(item.color || '#3b82f6');
-      if (colorMode === 'weight') {
+      if (colorMode === 'vivid') {
+        const vividHex = VIVID_NEON_PALETTE[Math.abs(item.sequenceNumber - 1) % VIVID_NEON_PALETTE.length];
+        boxColor = new THREE.Color(vividHex);
+      } else if (colorMode === 'weight') {
         const weightRatio = item.weight / maxItemWeight;
-        boxColor = new THREE.Color().setHSL(0.33 * (1 - weightRatio), 0.85, 0.5);
+        boxColor = new THREE.Color().setHSL(0.33 * (1 - weightRatio), 0.95, 0.5);
       } else if (colorMode === 'sequence') {
         const seqRatio = item.sequenceNumber / Math.max(1, activeItemsToDisplay.length);
-        boxColor = new THREE.Color().setHSL(seqRatio * 0.8, 0.8, 0.5);
+        boxColor = new THREE.Color().setHSL(seqRatio * 0.85, 0.95, 0.52);
+      } else if (isVividBoost && item.color) {
+        // Boost saturation and brightness of base color
+        boxColor = new THREE.Color(boostHexToVivid(item.color));
       }
 
       if (isSelected) {
         boxColor = new THREE.Color(0xfacc15); // Vibrant Yellow for selection
       } else if (isHovered) {
-        boxColor = boxColor.clone().offsetHSL(0, 0, 0.15);
+        boxColor = boxColor.clone().offsetHSL(0, 0, 0.18);
       }
 
       const isSemiTransparent = isTranslucent && cargoOpacity < 100;
@@ -495,12 +505,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const boxGeo = new THREE.BoxGeometry(lenM, heiM, widM);
       const boxMat = new THREE.MeshStandardMaterial({
         color: boxColor,
-        roughness: 0.35,
+        roughness: 0.28,
         metalness: 0.05,
         wireframe: showWireframeOnly,
         transparent: isSemiTransparent || isHovered || isSelected,
         opacity: effectiveOpacity,
         depthWrite: !isSemiTransparent,
+        emissive: boxColor.clone().multiplyScalar(isVividBoost ? 0.15 : 0.08),
       });
 
       const mesh = new THREE.Mesh(boxGeo, boxMat);
@@ -518,7 +529,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       // Edges outline
       const edgesGeo = new THREE.EdgesGeometry(boxGeo);
       const edgeLineMat = new THREE.LineBasicMaterial({
-        color: isSelected ? 0x000000 : 0x1e293b,
+        color: isSelected ? 0x000000 : 0x0f172a,
         linewidth: isSelected ? 3 : 1,
         transparent: isSemiTransparent,
         opacity: isSemiTransparent ? 0.85 : 1.0
@@ -530,7 +541,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       boxMeshesRef.current.set(item.id, mesh);
     });
   }, [
-    activeItemsToDisplay, currentStep, colorMode, showWireframeOnly, 
+    activeItemsToDisplay, currentStep, colorMode, isVividBoost, showWireframeOnly, 
     isTranslucent, cargoOpacity,
     zSlicePercent, xSlicePercent, hoveredItem, activeSelectedItem, 
     maxItemWeight, container, currentTab, containers, sceneReady
@@ -837,30 +848,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
         {/* Top-Right Viewer Toolbar */}
         <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-lg border border-slate-200 shadow-sm text-xs">
-          {/* Semi-transparent toggle button */}
-          <button
-            id="toggle-translucent-btn"
-            onClick={() => setIsTranslucent(!isTranslucent)}
-            title={isJa ? (isTranslucent ? '貨物の半透明表示を解除 (100%不透明にする)' : '貨物の見え方を半透明にする (奥・内部の貨物まで透過可視化)') : (isTranslucent ? 'Disable Translucent View (make opaque)' : 'Make Cargo Translucent (X-Ray view)')}
-            className={`px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-1.5 font-bold ${
-              isTranslucent 
-                ? 'bg-indigo-600 text-white shadow-2xs' 
-                : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            <Blend className="w-3.5 h-3.5" />
-            <span className="text-xs">{isJa ? '半透明' : 'Translucent'}</span>
-            {isTranslucent && (
-              <span className="text-[10px] bg-indigo-700/80 px-1 py-0.2 rounded font-mono font-normal">
-                {cargoOpacity}%
-              </span>
-            )}
-          </button>
-          <div className="w-px h-4 bg-slate-200 mx-0.5" />
           <button
             id="toggle-slice-controls-btn"
             onClick={() => setShowSliceControls(!showSliceControls)}
-            title={isJa ? '視点・断面・積載シミュレーション設定' : 'Camera Views, Slices & Loading Controls'}
+            title={isJa ? '操作・視点・表示設定 (Vivid・半透明・断面・シミュレーション)' : 'Controls, Display & Slicing Settings'}
             className={`px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-1.5 font-bold ${
               showSliceControls 
                 ? 'bg-slate-900 text-white shadow-2xs' 
@@ -870,9 +861,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="text-xs">{isJa ? '操作・視点設定' : 'Controls'}</span>
-            {(zSlicePercent < 100 || xSlicePercent < 100 || isPlaying) && !showSliceControls && (
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-900 animate-pulse" />
+            <span className="text-xs">{isJa ? '操作・表示設定' : 'Controls'}</span>
+            {!showSliceControls && (isVividBoost || isTranslucent || zSlicePercent < 100 || xSlicePercent < 100 || isPlaying) && (
+              <span className="flex items-center gap-1 ml-0.5">
+                {isVividBoost && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-pink-500" title={isJa ? '鮮やかON' : 'Vivid ON'} />
+                )}
+                {isTranslucent && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" title={isJa ? '半透明ON' : 'Translucent ON'} />
+                )}
+              </span>
             )}
           </button>
           <div className="w-px h-4 bg-slate-200 mx-0.5" />
@@ -1096,7 +1094,166 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
           </div>
 
-          {/* 1. Play Load / Loading Simulation Player */}
+          {/* 2. Visual & Display Style Controls (Vivid & Translucent) */}
+          <div className="bg-slate-50/90 border border-slate-200 p-2.5 rounded-lg space-y-2.5">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-pink-500" />
+              {isJa ? '表示・カラー設定' : 'Display & Visuals'}
+            </span>
+
+            {/* Quick Toggle Buttons Grid for Vivid and Translucent */}
+            <div className="grid grid-cols-2 gap-1.5">
+              {/* Vivid Toggle Button */}
+              <button
+                type="button"
+                id="panel-vivid-boost-toggle"
+                onClick={() => setIsVividBoost(!isVividBoost)}
+                className={`py-1.5 px-2 rounded-md font-bold text-xs flex items-center justify-between gap-1.5 transition-all border ${
+                  isVividBoost
+                    ? 'bg-pink-600 text-white border-pink-700 shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  <Sparkles className={`w-3.5 h-3.5 ${isVividBoost ? 'text-yellow-300' : 'text-pink-500'}`} />
+                  <span>{isJa ? '鮮やか' : 'Vivid'}</span>
+                </span>
+                <span className={`text-[10px] px-1 py-0.2 rounded font-mono font-bold ${isVividBoost ? 'bg-pink-700 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  {isVividBoost ? 'ON' : 'OFF'}
+                </span>
+              </button>
+
+              {/* Translucent Toggle Button */}
+              <button
+                type="button"
+                id="panel-translucent-toggle"
+                onClick={() => {
+                  if (!isTranslucent && cargoOpacity >= 100) {
+                    setCargoOpacity(65);
+                  }
+                  setIsTranslucent(!isTranslucent);
+                }}
+                className={`py-1.5 px-2 rounded-md font-bold text-xs flex items-center justify-between gap-1.5 transition-all border ${
+                  isTranslucent
+                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  <Blend className="w-3.5 h-3.5" />
+                  <span>{isJa ? '半透明' : 'Translucent'}</span>
+                </span>
+                <span className={`text-[10px] px-1 py-0.2 rounded font-mono font-bold ${isTranslucent ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  {isTranslucent ? `${cargoOpacity}%` : 'OFF'}
+                </span>
+              </button>
+            </div>
+
+            {/* If Translucent is ON, show opacity slider & presets */}
+            {isTranslucent && (
+              <div className="space-y-1.5 pt-1.5 border-t border-slate-200/80">
+                <div className="flex items-center justify-between text-[11px] text-slate-600">
+                  <span className="font-medium flex items-center gap-1">
+                    <Blend className="w-3 h-3 text-indigo-600" />
+                    {isJa ? '不透明度' : 'Opacity'}:
+                  </span>
+                  <span className="font-mono font-bold text-indigo-700">{cargoOpacity}%</span>
+                </div>
+                <input
+                  id="cargo-opacity-slider"
+                  type="range"
+                  min="20"
+                  max="95"
+                  step="5"
+                  value={cargoOpacity}
+                  onChange={(e) => setCargoOpacity(Number(e.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                />
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {[30, 50, 65, 85].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setCargoOpacity(val)}
+                      className={`py-0.5 rounded text-[10px] font-medium border text-center transition-colors ${
+                        cargoOpacity === val
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {val}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Color Scheme selector */}
+            <div className="pt-1.5 border-t border-slate-200/80 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-slate-500 font-medium">
+                  {isJa ? '配色モード:' : 'Color Scheme:'}
+                </span>
+                <span className="text-[10px] text-slate-600 font-medium">
+                  {colorMode === 'vivid' ? (isJa ? '✨ 鮮やかネオン' : '✨ Vivid Neon') : ''}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1 text-[10px]">
+                <button
+                  id="color-mode-cargo-btn"
+                  onClick={() => setColorMode('cargo')}
+                  className={`py-1 rounded-md text-center transition-colors font-semibold ${
+                    colorMode === 'cargo' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {isJa ? '種別' : 'Cargo'}
+                </button>
+                <button
+                  id="color-mode-vivid-btn"
+                  onClick={() => setColorMode('vivid')}
+                  title={isJa ? '超鮮やかなネオンカラーで表示' : 'Show with vivid neon colors'}
+                  className={`py-1 rounded-md text-center transition-colors font-bold ${
+                    colorMode === 'vivid' ? 'bg-pink-600 text-white shadow-xs' : 'bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200'
+                  }`}
+                >
+                  {isJa ? '✨鮮やか' : '✨Vivid'}
+                </button>
+                <button
+                  id="color-mode-weight-btn"
+                  onClick={() => setColorMode('weight')}
+                  className={`py-1 rounded-md text-center transition-colors font-semibold ${
+                    colorMode === 'weight' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {isJa ? '重量' : 'Weight'}
+                </button>
+                <button
+                  id="color-mode-seq-btn"
+                  onClick={() => setColorMode('sequence')}
+                  className={`py-1 rounded-md text-center transition-colors font-semibold ${
+                    colorMode === 'sequence' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {isJa ? '順序' : 'Seq'}
+                </button>
+              </div>
+
+              {onApplyVividColors && (
+                <button
+                  type="button"
+                  id="panel-apply-vivid-colors-btn"
+                  onClick={() => onApplyVividColors('vivid_neon')}
+                  className="w-full mt-1 py-1.5 px-2 rounded-lg bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500 hover:from-pink-600 hover:via-purple-600 hover:to-cyan-600 text-white font-bold text-[10px] flex items-center justify-center gap-1.5 shadow-2xs transition-all active:scale-95"
+                  title={isJa ? '貨物マニフェスト自体に鮮やかネオンカラーを一括保存' : 'Apply vivid colors directly to manifest items'}
+                >
+                  <Palette className="w-3 h-3" />
+                  <span>{isJa ? '全貨物の色を鮮やかに変更' : 'Apply Vivid Colors to Cargo'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 3. Play Load / Loading Simulation Player */}
           <div className="bg-white border border-slate-300 p-2.5 rounded-lg space-y-2 shadow-2xs">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold flex items-center gap-1.5 text-slate-900">
@@ -1205,7 +1362,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
           </div>
 
-          {/* 2. Slicing Sliders */}
+          {/* 4. Slicing Sliders */}
           <div className="space-y-2.5">
             <div>
               <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
@@ -1243,96 +1400,6 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 onChange={(e) => setXSlicePercent(Number(e.target.value))}
                 className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
               />
-            </div>
-          </div>
-
-          {/* 3. Cargo Transparency (Translucent / Opacity) Controls */}
-          <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold flex items-center gap-1.5 text-slate-800">
-                <Blend className="w-3.5 h-3.5 text-indigo-600" />
-                {isJa ? '貨物の半透明表示' : 'Cargo Translucency'}
-              </span>
-              <button
-                type="button"
-                id="panel-translucent-toggle"
-                onClick={() => setIsTranslucent(!isTranslucent)}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                  isTranslucent
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                }`}
-              >
-                {isTranslucent ? (isJa ? '有効 (ON)' : 'ON') : (isJa ? '無効 (OFF)' : 'OFF')}
-              </button>
-            </div>
-
-            {isTranslucent && (
-              <div className="space-y-1.5 pt-1 border-t border-slate-200/60">
-                <div className="flex items-center justify-between text-[11px] text-slate-600">
-                  <span className="font-medium">{isJa ? '不透明度' : 'Opacity'}:</span>
-                  <span className="font-mono font-bold text-indigo-700">{cargoOpacity}%</span>
-                </div>
-                <input
-                  id="cargo-opacity-slider"
-                  type="range"
-                  min="20"
-                  max="95"
-                  step="5"
-                  value={cargoOpacity}
-                  onChange={(e) => setCargoOpacity(Number(e.target.value))}
-                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                />
-                <div className="grid grid-cols-4 gap-1 pt-0.5">
-                  {[30, 50, 65, 85].map((val) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setCargoOpacity(val)}
-                      className={`py-0.5 rounded text-[10px] font-medium border text-center transition-colors ${
-                        cargoOpacity === val
-                          ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {val}%
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 4. Color Mode Switcher */}
-          <div className="border-t border-slate-200 pt-2">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1 font-semibold">
-              {isJa ? '配色モード' : 'Color Scheme'}
-            </span>
-            <div className="grid grid-cols-3 gap-1 text-[10px]">
-              <button
-                onClick={() => setColorMode('cargo')}
-                className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                  colorMode === 'cargo' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {isJa ? '種別' : 'Cargo'}
-              </button>
-              <button
-                onClick={() => setColorMode('weight')}
-                className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                  colorMode === 'weight' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {isJa ? '重量' : 'Weight'}
-              </button>
-              <button
-                onClick={() => setColorMode('sequence')}
-                className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                  colorMode === 'sequence' ? 'bg-slate-900 text-white shadow-xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {isJa ? '順序' : 'Seq'}
-              </button>
             </div>
           </div>
         </div>

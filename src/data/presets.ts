@@ -508,7 +508,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         height: 750,
         weight: 380,
         quantity: 16,
-        color: '#475569', // Slate dark
+        color: '#00b4d8', // Vivid Sky Blue
         allowTilt: false,
         allowRoll: false,
         allowYaw: true,
@@ -525,7 +525,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         height: 450,
         weight: 120,
         quantity: 32,
-        color: '#0284c7', // Sky
+        color: '#7928ca', // Vivid Electric Purple
         allowTilt: false,
         allowRoll: false,
         allowYaw: true,
@@ -542,7 +542,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         height: 350,
         weight: 12,
         quantity: 80,
-        color: '#14b8a6', // Teal
+        color: '#00e676', // Vivid Spring Green
         allowTilt: false,
         allowRoll: false,
         allowYaw: true,
@@ -647,7 +647,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         height: 140,
         weight: 9.5,
         quantity: 480,
-        color: '#f97316', // Orange
+        color: '#ff6d00', // Vivid Orange
         allowTilt: false,
         allowRoll: false,
         allowYaw: true,
@@ -664,7 +664,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         height: 330,
         weight: 16.5,
         quantity: 260,
-        color: '#991b1b', // Wine red
+        color: '#ff0055', // Vivid Rose Magenta
         allowTilt: false,
         allowRoll: false,
         allowYaw: true,
@@ -681,7 +681,7 @@ export const SAMPLE_CARGO_PRESETS: CargoPreset[] = [
         height: 320,
         weight: 12.8,
         quantity: 320,
-        color: '#0284c7', // Blue
+        color: '#00e5ff', // Vivid Electric Cyan
         allowTilt: false,
         allowRoll: false,
         allowYaw: true,

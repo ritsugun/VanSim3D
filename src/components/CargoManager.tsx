@@ -5,9 +5,15 @@ import {
   Plus, Trash2, Upload, Download, Sparkles, 
   ShieldAlert, Check, FileSpreadsheet, FileDown,
   Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers, ArrowDownToLine,
-  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw
+  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, Palette, ChevronDown, Undo2
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
+import { 
+  VIVID_NEON_PALETTE, 
+  COLOR_PALETTE_THEMES, 
+  applyVividColorsToCargoList, 
+  ColorPaletteId 
+} from '../utils/colors';
 
 interface CargoManagerProps {
   cargoList: CargoItem[];
@@ -18,24 +24,7 @@ interface CargoManagerProps {
   onSelectContainer?: (containerId: string) => void;
 }
 
-const COLOR_PALETTE = [
-  '#ef4444', // Red
-  '#06b6d4', // Cyan
-  '#eab308', // Yellow
-  '#10b981', // Emerald
-  '#8b5cf6', // Violet
-  '#f97316', // Orange
-  '#ec4899', // Pink
-  '#3b82f6', // Blue
-  '#14b8a6', // Teal
-  '#6366f1', // Indigo
-  '#d97706', // Amber
-  '#059669', // Dark Emerald
-  '#4f46e5', // Deep Indigo
-  '#e11d48', // Rose
-  '#0284c7', // Sky
-  '#7c3aed', // Purple
-];
+const COLOR_PALETTE = VIVID_NEON_PALETTE;
 
 export const CargoManager: React.FC<CargoManagerProps> = ({
   cargoList,
@@ -49,6 +38,40 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [importNotification, setImportNotification] = useState<string | null>(null);
+
+  // Vivid colors palette state & handlers
+  const [previousColors, setPreviousColors] = useState<{ id: string; color: string }[] | null>(null);
+  const [showColorMenu, setShowColorMenu] = useState<boolean>(false);
+  const [activeThemeId, setActiveThemeId] = useState<ColorPaletteId>('vivid_neon');
+
+  const handleApplyPalette = (paletteId: ColorPaletteId) => {
+    setPreviousColors(cargoList.map(c => ({ id: c.id, color: c.color })));
+    setActiveThemeId(paletteId);
+    const updated = applyVividColorsToCargoList(cargoList, paletteId);
+    onChangeCargoList(updated);
+    setShowColorMenu(false);
+    const theme = COLOR_PALETTE_THEMES.find(t => t.id === paletteId);
+    setImportNotification(
+      isJa
+        ? `✨ ${theme?.nameJa || '鮮やかカラー'} を全貨物に適用しました！`
+        : `✨ Applied ${theme?.nameEn || 'vivid colors'} to all cargo items!`
+    );
+    setTimeout(() => setImportNotification(null), 3500);
+  };
+
+  const handleRevertColors = () => {
+    if (!previousColors) return;
+    const colorMap = new Map(previousColors.map(p => [p.id, p.color]));
+    const reverted = cargoList.map(c => ({
+      ...c,
+      color: colorMap.get(c.id) || c.color,
+    }));
+    onChangeCargoList(reverted);
+    setPreviousColors(null);
+    setShowColorMenu(false);
+    setImportNotification(isJa ? '↩️ カラーを直前の状態に戻しました' : '↩️ Reverted to previous colors');
+    setTimeout(() => setImportNotification(null), 3000);
+  };
 
   // Sorting and search controls state for Cargo manifest
   const [sortField, setSortField] = useState<'none' | 'name' | 'weight' | 'quantity'>('none');
@@ -515,6 +538,106 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             </button>
           </div>
 
+          {/* Vivid Colors Palette Switcher & Undo */}
+          <div className="relative">
+            <div className="flex items-center rounded-lg border border-pink-200 bg-gradient-to-r from-pink-50 via-purple-50 to-cyan-50 p-0.5 shadow-2xs">
+              <button
+                type="button"
+                id="apply-vivid-colors-direct-btn"
+                onClick={() => handleApplyPalette('vivid_neon')}
+                title={isJa ? '全貨物に超鮮やかなネオンカラーを一括適用' : 'Apply super vibrant neon colors to all items'}
+                className="px-2.5 py-1.5 rounded-md text-pink-700 hover:text-pink-900 font-bold flex items-center gap-1.5 transition-all active:scale-95 text-xs"
+              >
+                <Palette className="w-3.5 h-3.5 text-pink-600" />
+                <span>{isJa ? '鮮やかカラー' : 'Vivid Colors'}</span>
+              </button>
+              <button
+                type="button"
+                id="toggle-palette-menu-btn"
+                onClick={() => setShowColorMenu(!showColorMenu)}
+                title={isJa ? '鮮やかパレットの種類を選択' : 'Select color palette theme'}
+                className="px-1.5 py-1.5 rounded-md text-purple-700 hover:bg-white/80 transition-colors"
+              >
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showColorMenu ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {/* Dropdown Menu for Palettes */}
+            {showColorMenu && (
+              <div 
+                id="palette-dropdown-menu"
+                className="absolute right-0 top-full mt-1.5 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 animate-fade-in space-y-1"
+              >
+                <div className="px-2 py-1 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
+                    <Palette className="w-3.5 h-3.5 text-pink-600" />
+                    {isJa ? '鮮やか配色テーマの選択' : 'Select Vibrant Palette'}
+                  </span>
+                  {previousColors && (
+                    <button
+                      type="button"
+                      onClick={handleRevertColors}
+                      title={isJa ? '直前の配色に戻す' : 'Revert to previous colors'}
+                      className="text-[10px] text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-100"
+                    >
+                      <Undo2 className="w-3 h-3 text-slate-500" />
+                      <span>{isJa ? '元に戻す' : 'Revert'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {COLOR_PALETTE_THEMES.map((theme) => {
+                  const isActive = activeThemeId === theme.id;
+                  return (
+                    <button
+                      key={theme.id}
+                      type="button"
+                      onClick={() => handleApplyPalette(theme.id)}
+                      className={`w-full text-left p-2 rounded-lg transition-all flex flex-col gap-1 ${
+                        isActive
+                          ? 'bg-purple-50/80 border border-purple-200 shadow-2xs'
+                          : 'hover:bg-slate-50 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800">
+                          {isJa ? theme.nameJa : theme.nameEn}
+                        </span>
+                        {isActive && (
+                          <span className="text-[10px] bg-purple-600 text-white font-bold px-1.5 py-0.5 rounded-full">
+                            {isJa ? '適用中' : 'Active'}
+                          </span>
+                        )}
+                      </div>
+                      {/* Color strip swatch */}
+                      <div className="flex items-center h-2.5 rounded-full overflow-hidden w-full shadow-2xs">
+                        {theme.colors.slice(0, 10).map((c, idx) => (
+                          <div key={idx} className="h-full flex-1" style={{ backgroundColor: c }} />
+                        ))}
+                      </div>
+                      <span className="text-[10px] text-slate-500 leading-tight">
+                        {isJa ? theme.descriptionJa : theme.descriptionEn}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {previousColors && (
+                  <div className="pt-1.5 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={handleRevertColors}
+                      className="w-full py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />
+                      <span>{isJa ? '直前の配色に戻す' : 'Revert to Previous Colors'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <button
             id="open-presets-btn"
             onClick={() => setShowPresetsModal(true)}
@@ -737,15 +860,22 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-slate-500 font-medium">{isJa ? 'カラー:' : 'Color:'}</span>
               <div className="flex items-center gap-1.5 flex-wrap">
-                {COLOR_PALETTE.slice(0, 10).map(c => (
+                {COLOR_PALETTE.map(c => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setNewItem({ ...newItem, color: c })}
-                    className={`w-4 h-4 rounded-full border transition-all ${newItem.color === c ? 'border-slate-800 scale-110 shadow-xs' : 'border-transparent opacity-70'}`}
+                    className={`w-4 h-4 rounded-full border transition-all ${newItem.color === c ? 'border-slate-800 scale-125 shadow-xs ring-1 ring-slate-900' : 'border-transparent opacity-80 hover:opacity-100 hover:scale-110'}`}
                     style={{ backgroundColor: c }}
                   />
                 ))}
+                <input
+                  type="color"
+                  value={newItem.color}
+                  onChange={e => setNewItem({ ...newItem, color: e.target.value })}
+                  title={isJa ? 'カスタム色を指定' : 'Custom color'}
+                  className="w-4 h-4 rounded cursor-pointer border border-slate-300 p-0 overflow-hidden"
+                />
               </div>
             </div>
 
@@ -1232,15 +1362,22 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                     <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] text-slate-500 font-medium">{isJa ? '色:' : 'Color:'}</span>
-                        {COLOR_PALETTE.slice(0, 10).map(c => (
+                        {COLOR_PALETTE.map(c => (
                           <button
                             key={c}
                             type="button"
                             onClick={() => handleUpdateItem(cargo.id, { color: c })}
-                            className={`w-3.5 h-3.5 rounded-full border transition-all ${cargo.color === c ? 'border-slate-800 scale-110 shadow-xs' : 'border-transparent opacity-70'}`}
+                            className={`w-3.5 h-3.5 rounded-full border transition-all ${cargo.color === c ? 'border-slate-800 scale-125 shadow-xs ring-1 ring-slate-900' : 'border-transparent opacity-80 hover:opacity-100 hover:scale-110'}`}
                             style={{ backgroundColor: c }}
                           />
                         ))}
+                        <input
+                          type="color"
+                          value={cargo.color}
+                          onChange={e => handleUpdateItem(cargo.id, { color: e.target.value })}
+                          title={isJa ? 'カスタム色を指定' : 'Custom color'}
+                          className="w-3.5 h-3.5 rounded cursor-pointer border border-slate-300 p-0 overflow-hidden"
+                        />
                       </div>
 
                       <div className="flex items-center gap-2.5 flex-wrap">

@@ -17,6 +17,7 @@ import {
   Layers, Sliders, CheckCircle2, ShieldAlert, Zap, Bot,
   AlertTriangle, ChevronDown 
 } from 'lucide-react';
+import { applyVividColorsToCargoList, ColorPaletteId } from './utils/colors';
 
 export default function App() {
   // Application State
@@ -28,7 +29,10 @@ export default function App() {
   const [autoSelectCriteria, setAutoSelectCriteria] = useState<AutoSelectCriteria>('overall_best');
 
   const [selectedContainer, setSelectedContainer] = useState<Container>(STANDARD_CONTAINERS[1]); // 40GP default
-  const [cargoList, setCargoList] = useState<CargoItem[]>(SAMPLE_CARGO_PRESETS[0].items); // HVAC CSV Dataset default
+  // Initialize with vibrant, high-saturation neon colors per user request: "貨物の色を鮮やかな色に変えて見たい"
+  const [cargoList, setCargoList] = useState<CargoItem[]>(() => 
+    applyVividColorsToCargoList(SAMPLE_CARGO_PRESETS[0].items, 'vivid_neon')
+  );
   const [containerCountMode, setContainerCountMode] = useState<'auto' | 'manual'>('auto');
   const [containerCount, setContainerCount] = useState<number>(1);
   const [activeContainerIndex, setActiveContainerIndex] = useState<number | 'all'>('all');
@@ -106,6 +110,11 @@ export default function App() {
         // Ignore if unavailable
       }
     }, 200);
+  }, []);
+
+  // Apply vivid color palette to all cargo items
+  const handleApplyVividColors = useCallback((paletteId: ColorPaletteId = 'vivid_neon') => {
+    setCargoList(prev => applyVividColorsToCargoList(prev, paletteId));
   }, []);
 
   // Total raw quantity entered across all cargo items
@@ -270,6 +279,7 @@ export default function App() {
                 language={language}
                 onSelectItem={setSelectedItem}
                 selectedItem={selectedItem}
+                onApplyVividColors={handleApplyVividColors}
               />
             </div>
 
@@ -319,6 +329,7 @@ export default function App() {
                   language={language}
                   onSelectItem={setSelectedItem}
                   selectedItem={selectedItem}
+                  onApplyVividColors={handleApplyVividColors}
                 />
               </div>
             </div>
@@ -359,6 +370,7 @@ export default function App() {
                   language={language}
                   onSelectItem={setSelectedItem}
                   selectedItem={selectedItem}
+                  onApplyVividColors={handleApplyVividColors}
                 />
               </div>
             </div>
