@@ -1,20 +1,28 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json({ limit: '10mb' }));
+
+  // Japanese Font endpoint for PDF Export
+  app.get('/api/font/japanese', (req, res) => {
+    const fontPath = '/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf';
+    if (fs.existsSync(fontPath)) {
+      res.setHeader('Content-Type', 'font/ttf');
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.sendFile(fontPath);
+    }
+    return res.status(404).send('Font not found');
+  });
 
   // AI Packing Advisor endpoint using Gemini API
   app.post('/api/ai-consultant', async (req, res) => {
@@ -94,7 +102,12 @@ Respond in structured JSON format with fields:
   });
 
   // Vite middleware for development vs static build in production
-  if (process.env.NODE_ENV !== 'production') {
+  const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    process.argv[1]?.endsWith('server.cjs') ||
+    process.argv[1]?.includes('dist');
+
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

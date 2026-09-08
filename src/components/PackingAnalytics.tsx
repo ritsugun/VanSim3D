@@ -42,23 +42,14 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
   unitSystem,
   containers,
   overallMetrics,
-  activeContainerIndex = 0,
+  activeContainerIndex = 1,
   onSelectContainerIndex,
   packedItems = []
 }) => {
   const isJa = language === 'ja';
   const [selectedBreakdownTab, setSelectedBreakdownTab] = useState<number | 'all'>('all');
 
-  // CoG Offset status
-  const isXSafe = Math.abs(metrics.centerOfGravity.offsetXPercent) <= 5;
-  const isYSafe = Math.abs(metrics.centerOfGravity.offsetYPercent) <= 5;
-  const isOverallBalanced = isXSafe && isYSafe;
-
-  // Visual position of crosshair on the 2D balance board
-  const crosshairLeft = 50 + metrics.centerOfGravity.offsetXPercent;
-  const crosshairTop = 50 + metrics.centerOfGravity.offsetYPercent;
-
-  const hasMultipleContainers = containers && containers.length > 1;
+  const hasMultipleContainers = Boolean(containers && containers.length > 1);
 
   // Effective containers list
   const effectiveContainerLoads: ContainerLoad[] = useMemo(() => {
@@ -72,6 +63,31 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
       metrics: metrics
     }];
   }, [containers, container, packedItems, metrics]);
+
+  // Determine currently selected container load
+  const activeContainerLoad = useMemo(() => {
+    if (typeof activeContainerIndex === 'number') {
+      const found = effectiveContainerLoads.find(c => c.containerIndex === activeContainerIndex);
+      if (found) return found;
+      if (activeContainerIndex >= 1 && activeContainerIndex <= effectiveContainerLoads.length) {
+        return effectiveContainerLoads[activeContainerIndex - 1];
+      }
+    }
+    return effectiveContainerLoads[0];
+  }, [activeContainerIndex, effectiveContainerLoads]);
+
+  const activeContNumber = activeContainerLoad.containerIndex || 1;
+  const activeMetrics = activeContainerLoad.metrics;
+  const activeContainer = activeContainerLoad.container || container;
+
+  // CoG Offset status for active container
+  const isXSafe = Math.abs(activeMetrics.centerOfGravity.offsetXPercent) <= 5;
+  const isYSafe = Math.abs(activeMetrics.centerOfGravity.offsetYPercent) <= 5;
+  const isOverallBalanced = isXSafe && isYSafe;
+
+  // Visual position of crosshair on the 2D balance board
+  const crosshairLeft = 50 + activeMetrics.centerOfGravity.offsetXPercent;
+  const crosshairTop = 50 + activeMetrics.centerOfGravity.offsetYPercent;
 
   // Helper to compute breakdown for an array of packed items
   const computeBreakdown = (items: PackedItem[]): CargoBreakdownItem[] => {
@@ -231,14 +247,18 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           {/* Container Breakdown Chips */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {containers.map((cLoad, idx) => {
-              const isSelected = activeContainerIndex === idx;
+              const cIndex = cLoad.containerIndex || (idx + 1);
+              const isSelected = activeContNumber === cIndex;
               return (
                 <div
-                  key={cLoad.containerIndex}
-                  onClick={() => onSelectContainerIndex && onSelectContainerIndex(idx)}
+                  key={cIndex}
+                  onClick={() => {
+                    onSelectContainerIndex && onSelectContainerIndex(cIndex);
+                    setSelectedBreakdownTab(cIndex);
+                  }}
                   className={`p-2.5 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
                     isSelected
-                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-slate-900/20'
                       : 'bg-white hover:bg-slate-100 border-slate-200 text-slate-800'
                   }`}
                 >
@@ -246,11 +266,16 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs font-mono ${
                       isSelected ? 'bg-white text-slate-900' : 'bg-slate-100 text-slate-900'
                     }`}>
-                      #{idx + 1}
+                      #{cIndex}
                     </span>
                     <div>
                       <span className="font-bold text-xs block">
-                        {isJa ? `コンテナ #${idx + 1}` : `Container #${idx + 1}`}
+                        {isJa ? `コンテナ #${cIndex}` : `Container #${cIndex}`}
+                        {isSelected && (
+                          <span className="ml-1.5 text-[9px] bg-slate-700 text-slate-200 px-1.5 py-0.2 rounded font-sans font-normal">
+                            {isJa ? '表示中' : 'Active'}
+                          </span>
+                        )}
                       </span>
                       <span className={`text-[10px] ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
                         {cLoad.packedItems.length} {isJa ? '個積載' : 'boxes'} • {formatWeight(cLoad.metrics.packedWeightKg, unitSystem)}
@@ -274,7 +299,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
       )}
 
       {/* Safety Limit Truncation Alert */}
-      {((overallMetrics?.safetyLimitTruncatedCount && overallMetrics.safetyLimitTruncatedCount > 0) || (metrics.safetyLimitTruncatedCount && metrics.safetyLimitTruncatedCount > 0)) && (
+      {(((overallMetrics?.safetyLimitTruncatedCount ?? 0) > 0) || ((metrics.safetyLimitTruncatedCount ?? 0) > 0)) && (
         <div id="safety-limit-analytics-alert" className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-amber-950 text-xs shadow-xs">
           <div className="flex items-start gap-2.5">
             <div className="w-6 h-6 rounded-md bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5 font-bold shadow-2xs">
@@ -325,6 +350,52 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         </div>
       )}
 
+      {/* Active Container Switcher Bar for Multi-Container Fleets */}
+      {hasMultipleContainers && (
+        <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-2.5 shadow-2xs text-xs flex-wrap gap-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500 font-medium flex items-center gap-1.5">
+              <Box className="w-3.5 h-3.5 text-slate-700" />
+              {isJa ? '分析対象コンテナ:' : 'Active Container:'}
+            </span>
+            <span className="bg-slate-900 text-white font-mono font-bold px-2 py-0.5 rounded text-xs">
+              #{activeContNumber} {activeContainer.name}
+            </span>
+            <span className="text-slate-500 text-[11px]">
+              ({activeContainerLoad.packedItems.length} {isJa ? '個積載' : 'boxes'} • {formatWeight(activeMetrics.packedWeightKg, unitSystem)} • {activeMetrics.volumeUtilization.toFixed(1)}% {isJa ? '容積率' : 'vol'})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 text-[11px] mr-1">{isJa ? 'コンテナ切替:' : 'Select Container:'}</span>
+            {effectiveContainerLoads.map((c, idx) => {
+              const cIndex = c.containerIndex || (idx + 1);
+              const isCurrentActive = activeContNumber === cIndex;
+              return (
+                <button
+                  key={cIndex}
+                  type="button"
+                  onClick={() => {
+                    onSelectContainerIndex && onSelectContainerIndex(cIndex);
+                    setSelectedBreakdownTab(cIndex);
+                  }}
+                  className={`px-3 py-1 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    isCurrentActive
+                      ? 'bg-slate-900 text-white shadow-xs ring-1 ring-slate-900'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                  }`}
+                >
+                  <span>#{cIndex}</span>
+                  <span className={`text-[10px] font-normal ${isCurrentActive ? 'text-slate-300' : 'text-slate-400'}`}>
+                    ({c.metrics.volumeUtilization.toFixed(0)}%)
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Main KPI Utilization Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-slate-800 text-xs">
         {/* Volume Utilization Card */}
@@ -332,21 +403,26 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="flex items-center justify-between mb-2">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
               <Gauge className="w-4 h-4 text-slate-800" />
-              {isJa ? '容積積載率 (CBM)' : 'Volume Utilization'}
+              <span>{isJa ? '容積積載率 (CBM)' : 'Volume Utilization'}</span>
+              {hasMultipleContainers && (
+                <span className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold px-1.5 py-0.2 rounded border border-slate-200">
+                  #{activeContNumber}
+                </span>
+              )}
             </span>
             <span className="font-bold font-mono text-base text-slate-900">
-              {metrics.volumeUtilization.toFixed(1)}%
+              {activeMetrics.volumeUtilization.toFixed(1)}%
             </span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2.5">
             <div 
               className="bg-slate-900 h-full transition-all duration-500 rounded-full"
-              style={{ width: `${Math.min(100, metrics.volumeUtilization)}%` }}
+              style={{ width: `${Math.min(100, activeMetrics.volumeUtilization)}%` }}
             />
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-            <span>{isJa ? '積載' : 'Used'}: <strong className="text-slate-800">{formatVolume(metrics.packedVolumeCbm, unitSystem, 2)}</strong></span>
-            <span>{isJa ? '空隙' : 'Free'}: <strong className="text-slate-800">{formatVolume(metrics.freeVolumeCbm, unitSystem, 2)}</strong></span>
+            <span>{isJa ? '積載' : 'Used'}: <strong className="text-slate-800">{formatVolume(activeMetrics.packedVolumeCbm, unitSystem, 2)}</strong></span>
+            <span>{isJa ? '空隙' : 'Free'}: <strong className="text-slate-800">{formatVolume(activeMetrics.freeVolumeCbm, unitSystem, 2)}</strong></span>
           </div>
         </div>
 
@@ -355,21 +431,26 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="flex items-center justify-between mb-2">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
               <Scale className="w-4 h-4 text-slate-800" />
-              {isJa ? '重量積載率 (Payload)' : 'Weight Utilization'}
+              <span>{isJa ? '重量積載率 (Payload)' : 'Weight Utilization'}</span>
+              {hasMultipleContainers && (
+                <span className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold px-1.5 py-0.2 rounded border border-slate-200">
+                  #{activeContNumber}
+                </span>
+              )}
             </span>
             <span className="font-bold font-mono text-base text-slate-900">
-              {metrics.weightUtilization.toFixed(1)}%
+              {activeMetrics.weightUtilization.toFixed(1)}%
             </span>
           </div>
           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-2.5">
             <div 
               className="h-full transition-all duration-500 rounded-full bg-slate-900"
-              style={{ width: `${Math.min(100, metrics.weightUtilization)}%` }}
+              style={{ width: `${Math.min(100, activeMetrics.weightUtilization)}%` }}
             />
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-            <span>{isJa ? '貨物総重量' : 'Cargo'}: <strong className="text-slate-800">{formatWeight(metrics.packedWeightKg, unitSystem)}</strong></span>
-            <span>{isJa ? '上限' : 'Max'}: <strong className="text-slate-800">{formatWeight(container.maxWeight, unitSystem)}</strong></span>
+            <span>{isJa ? '貨物総重量' : 'Cargo'}: <strong className="text-slate-800">{formatWeight(activeMetrics.packedWeightKg, unitSystem)}</strong></span>
+            <span>{isJa ? '上限' : 'Max'}: <strong className="text-slate-800">{formatWeight(activeContainer.maxWeight, unitSystem)}</strong></span>
           </div>
         </div>
 
@@ -378,13 +459,24 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
               <PackageCheck className="w-4 h-4 text-slate-800" />
-              {isJa ? '積載完了個数' : 'Cargo Packed'}
+              <span>{isJa ? '積載完了個数' : 'Cargo Packed'}</span>
+              {hasMultipleContainers && (
+                <span className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold px-1.5 py-0.2 rounded border border-slate-200">
+                  #{activeContNumber}
+                </span>
+              )}
             </span>
             <div className="text-right">
-              <span className="font-mono text-slate-900 font-bold text-base block">
-                {metrics.packedCount.toLocaleString()} / {metrics.totalItemCount.toLocaleString()}
-              </span>
-              {metrics.safetyLimitTruncatedCount && metrics.safetyLimitTruncatedCount > 0 && (
+              {hasMultipleContainers ? (
+                <span className="font-mono text-slate-900 font-bold text-base block">
+                  {activeContainerLoad.packedItems.length.toLocaleString()} <span className="text-xs text-slate-400 font-normal">/ {(overallMetrics?.totalPackedCount || packedItems.length).toLocaleString()} {isJa ? '個' : 'total'}</span>
+                </span>
+              ) : (
+                <span className="font-mono text-slate-900 font-bold text-base block">
+                  {activeMetrics.packedCount.toLocaleString()} / {activeMetrics.totalItemCount.toLocaleString()}
+                </span>
+              )}
+              {(metrics.safetyLimitTruncatedCount ?? 0) > 0 && (
                 <span className="text-[10px] text-amber-700 font-bold font-sans">
                   {isJa ? `(-${metrics.safetyLimitTruncatedCount.toLocaleString()} 除外)` : `(-${metrics.safetyLimitTruncatedCount.toLocaleString()} capped)`}
                 </span>
@@ -392,9 +484,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-slate-500 my-1">
-            {isJa 
-              ? `${metrics.packedCount} 個の荷物を最適な配置順で配置完了` 
-              : `Optimally sequenced and packed ${metrics.packedCount} cargo boxes`}
+            {hasMultipleContainers
+              ? (isJa 
+                  ? `コンテナ #${activeContNumber} に ${activeContainerLoad.packedItems.length} 個の荷物を最適配置` 
+                  : `Packed ${activeContainerLoad.packedItems.length} cargo boxes into Container #${activeContNumber}`)
+              : (isJa 
+                  ? `${activeMetrics.packedCount} 個の荷物を最適な配置順で配置完了` 
+                  : `Optimally sequenced and packed ${activeMetrics.packedCount} cargo boxes`)}
           </p>
           <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-[10px] text-slate-400">
             <span>{isJa ? 'アルゴリズム計算時間' : 'Calc Time'}:</span>
@@ -407,20 +503,38 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
               <DollarSign className="w-4 h-4 text-slate-800" />
-              {isJa ? '概算輸送コスト' : 'Estimated Cost'}
+              <span>{isJa ? '概算輸送コスト' : 'Estimated Cost'}</span>
+              {hasMultipleContainers && (
+                <span className="bg-slate-100 text-slate-800 font-mono text-[10px] font-bold px-1.5 py-0.2 rounded border border-slate-200">
+                  #{activeContNumber}
+                </span>
+              )}
             </span>
             <span className="font-mono text-slate-900 font-bold text-base">
-              ${((container.costEstimate || 2000) * metrics.containersNeeded).toLocaleString()}
+              ${hasMultipleContainers
+                ? (activeContainer.costEstimate || 2000).toLocaleString()
+                : ((container.costEstimate || 2000) * metrics.containersNeeded).toLocaleString()}
             </span>
           </div>
           <p className="text-[11px] text-slate-500 my-1">
             {isJa 
-              ? `CBM単価: 約 $${(((container.costEstimate || 2000)) / Math.max(1, metrics.packedVolumeCbm)).toFixed(1)} / m³` 
-              : `Cost per CBM: $${(((container.costEstimate || 2000)) / Math.max(1, metrics.packedVolumeCbm)).toFixed(1)} / m³`}
+              ? `CBM単価: 約 $${(((activeContainer.costEstimate || 2000)) / Math.max(1, activeMetrics.packedVolumeCbm)).toFixed(1)} / m³` 
+              : `Cost per CBM: $${(((activeContainer.costEstimate || 2000)) / Math.max(1, activeMetrics.packedVolumeCbm)).toFixed(1)} / m³`}
           </p>
           <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-[10px] text-slate-400">
-            <span>{isJa ? '必要コンテナ数' : 'Units Required'}:</span>
-            <span className="font-mono text-slate-900 font-bold">{metrics.containersNeeded} 台</span>
+            {hasMultipleContainers && overallMetrics ? (
+              <>
+                <span>{isJa ? '全編成コスト' : 'Fleet Total'}:</span>
+                <span className="font-mono text-slate-900 font-bold">
+                  ${overallMetrics.totalCostEstimate?.toLocaleString()} ({overallMetrics.totalContainersCount} {isJa ? '台' : 'units'})
+                </span>
+              </>
+            ) : (
+              <>
+                <span>{isJa ? '必要コンテナ数' : 'Units Required'}:</span>
+                <span className="font-mono text-slate-900 font-bold">{metrics.containersNeeded} 台</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -432,7 +546,11 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
             <h3 className="font-bold text-slate-900 flex items-center gap-2">
               <Crosshair className="w-4 h-4 text-slate-900" />
-              {isJa ? '重心位置・バランス解析 (Center of Gravity)' : 'Center of Gravity (CoG) Stability'}
+              <span>
+                {isJa 
+                  ? `重心位置・バランス解析${hasMultipleContainers ? ` (コンテナ #${activeContNumber})` : ' (CoG)'}` 
+                  : `Center of Gravity Stability${hasMultipleContainers ? ` (Container #${activeContNumber})` : ''}`}
+              </span>
             </h3>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 bg-slate-100 text-slate-800 border border-slate-300">
               {isOverallBalanced ? <CheckCircle2 className="w-3 h-3 text-slate-700" /> : <AlertTriangle className="w-3 h-3 text-slate-700" />}
@@ -473,21 +591,21 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               <div className="flex items-center justify-between border-b border-slate-100 pb-1">
                 <span className="text-slate-400">{isJa ? '前後オフセット (X):' : 'Fore-Aft Offset (X):'}</span>
                 <span className="font-mono font-bold text-slate-800">
-                  {metrics.centerOfGravity.offsetXPercent > 0 ? '+' : ''}{metrics.centerOfGravity.offsetXPercent.toFixed(1)}% 
-                  <span className="text-slate-400 font-normal ml-1">({formatLength(metrics.centerOfGravity.x, unitSystem)})</span>
+                  {activeMetrics.centerOfGravity.offsetXPercent > 0 ? '+' : ''}{activeMetrics.centerOfGravity.offsetXPercent.toFixed(1)}% 
+                  <span className="text-slate-400 font-normal ml-1">({formatLength(activeMetrics.centerOfGravity.x, unitSystem)})</span>
                 </span>
               </div>
               <div className="flex items-center justify-between border-b border-slate-100 pb-1">
                 <span className="text-slate-400">{isJa ? '左右オフセット (Y):' : 'Left-Right Offset (Y):'}</span>
                 <span className="font-mono font-bold text-slate-800">
-                  {metrics.centerOfGravity.offsetYPercent > 0 ? '+' : ''}{metrics.centerOfGravity.offsetYPercent.toFixed(1)}%
-                  <span className="text-slate-400 font-normal ml-1">({formatLength(metrics.centerOfGravity.y, unitSystem)})</span>
+                  {activeMetrics.centerOfGravity.offsetYPercent > 0 ? '+' : ''}{activeMetrics.centerOfGravity.offsetYPercent.toFixed(1)}%
+                  <span className="text-slate-400 font-normal ml-1">({formatLength(activeMetrics.centerOfGravity.y, unitSystem)})</span>
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">{isJa ? '重心高さ (Z):' : 'CoG Height (Z):'}</span>
                 <span className="font-mono font-bold text-slate-900">
-                  {formatLength(metrics.centerOfGravity.z, unitSystem)}
+                  {formatLength(activeMetrics.centerOfGravity.z, unitSystem)}
                 </span>
               </div>
             </div>
@@ -499,7 +617,11 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
             <h3 className="font-bold text-slate-900 flex items-center gap-2">
               <Truck className="w-4 h-4 text-slate-800" />
-              {isJa ? '陸上輸送 軸重配分推定 (Axle Load)' : 'Road Trailer Axle Load Estimation'}
+              <span>
+                {isJa 
+                  ? `陸上輸送 軸重配分推定${hasMultipleContainers ? ` (コンテナ #${activeContNumber})` : ' (Axle Load)'}` 
+                  : `Road Trailer Axle Load Estimation${hasMultipleContainers ? ` (Container #${activeContNumber})` : ''}`}
+              </span>
             </h3>
             <span className="text-slate-400 text-[10px]">
               {isJa ? 'キングピン / 後軸 2軸配分' : 'Kingpin / Rear Tandem'}
@@ -512,13 +634,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-600 font-medium">{isJa ? '前軸 / 牽引側 (Front / Kingpin):' : 'Front Axle / Kingpin:'}</span>
                 <span className="font-mono font-bold text-slate-900">
-                  {metrics.axleDistribution.frontAxlePercent.toFixed(1)}% ({formatWeight(metrics.axleDistribution.frontAxleKg, unitSystem)})
+                  {activeMetrics.axleDistribution.frontAxlePercent.toFixed(1)}% ({formatWeight(activeMetrics.axleDistribution.frontAxleKg, unitSystem)})
                 </span>
               </div>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                 <div 
                   className="bg-slate-900 h-full rounded-full transition-all duration-500" 
-                  style={{ width: `${metrics.axleDistribution.frontAxlePercent}%` }} 
+                  style={{ width: `${activeMetrics.axleDistribution.frontAxlePercent}%` }} 
                 />
               </div>
             </div>
@@ -528,13 +650,13 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               <div className="flex items-center justify-between text-[11px] mb-1">
                 <span className="text-slate-600 font-medium">{isJa ? '後軸 / タンデム軸 (Rear Tandem):' : 'Rear Axle / Tandem:'}</span>
                 <span className="font-mono font-bold text-slate-900">
-                  {metrics.axleDistribution.rearAxlePercent.toFixed(1)}% ({formatWeight(metrics.axleDistribution.rearAxleKg, unitSystem)})
+                  {activeMetrics.axleDistribution.rearAxlePercent.toFixed(1)}% ({formatWeight(activeMetrics.axleDistribution.rearAxleKg, unitSystem)})
                 </span>
               </div>
               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                 <div 
                   className="bg-slate-700 h-full rounded-full transition-all duration-500" 
-                  style={{ width: `${metrics.axleDistribution.rearAxlePercent}%` }} 
+                  style={{ width: `${activeMetrics.axleDistribution.rearAxlePercent}%` }} 
                 />
               </div>
             </div>
@@ -582,7 +704,10 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                 <button
                   key={b.containerIndex}
                   type="button"
-                  onClick={() => setSelectedBreakdownTab(idx)}
+                  onClick={() => {
+                    setSelectedBreakdownTab(idx);
+                    onSelectContainerIndex && onSelectContainerIndex(idx);
+                  }}
                   className={`px-2.5 py-1 rounded-md transition-all font-mono ${
                     selectedBreakdownTab === idx
                       ? 'bg-slate-900 text-white shadow-xs font-bold'
@@ -690,7 +815,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                   <div className="flex items-center justify-between border-b border-slate-200 pb-2 flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <span className="w-6 h-6 rounded-md bg-slate-900 text-white font-mono font-bold flex items-center justify-center text-xs">
-                        #{idx + 1}
+                        #{b.containerIndex}
                       </span>
                       <div>
                         <h4 className="font-bold text-slate-900 text-xs">
@@ -750,7 +875,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
           <div>
             {(() => {
               const currentLoad = typeof selectedBreakdownTab === 'number' 
-                ? breakdownByContainer[selectedBreakdownTab] || breakdownByContainer[0]
+                ? (breakdownByContainer.find(b => b.containerIndex === selectedBreakdownTab) || breakdownByContainer[0])
                 : breakdownByContainer[0];
               
               if (!currentLoad) return null;

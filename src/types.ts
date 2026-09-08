@@ -100,8 +100,9 @@ export interface PackedItem {
   sequenceNumber: number; // 1, 2, 3... loading sequence
   stepIndex: number;
   rotationIndex: number; // 0..5
-  containerIndex: number; // 0 for primary container
+  containerIndex: number; // 1-based container number (Container #1, #2, ...)
   layer: number;
+  isManual?: boolean;
 }
 
 export interface UnplacedItem {
@@ -196,6 +197,8 @@ export interface PackingResult {
   rawTotalItemCount?: number;
   safetyLimitTruncatedCount?: number;
   truncatedItems?: TruncatedItemDetail[];
+  hasManualAdjustments?: boolean;
+  manualAdjustmentsCount?: number;
 }
 
 export interface AiConsultantResponse {

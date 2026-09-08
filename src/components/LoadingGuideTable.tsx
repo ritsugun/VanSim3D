@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { PackedItem, Language, UnitSystem, Container, ContainerLoad } from '../types';
+import { PackedItem, Language, UnitSystem, Container, ContainerLoad, PackingMetrics, OverallPackingMetrics, UnplacedItem } from '../types';
 import { 
-  ClipboardList, Search, Download, Printer, 
+  ClipboardList, Search, Download, Printer, FileText,
   ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box, ArrowDownToLine 
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
+import { WarehousePdfExportModal } from './WarehousePdfExportModal';
 
 interface LoadingGuideTableProps {
   packedItems: PackedItem[];
@@ -16,6 +17,11 @@ interface LoadingGuideTableProps {
   containers?: ContainerLoad[];
   activeContainerIndex?: number | 'all';
   onSelectContainerIndex?: (index: number | 'all') => void;
+  metrics?: PackingMetrics;
+  overallMetrics?: OverallPackingMetrics;
+  unplacedItems?: UnplacedItem[];
+  algorithmName?: string;
+  hasManualAdjustments?: boolean;
 }
 
 export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
@@ -27,13 +33,19 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
   selectedItem,
   containers,
   activeContainerIndex = 'all',
-  onSelectContainerIndex
+  onSelectContainerIndex,
+  metrics,
+  overallMetrics,
+  unplacedItems = [],
+  algorithmName = 'Extreme Points 3D (BFD)',
+  hasManualAdjustments = false
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedLayer, setSelectedLayer] = useState<string>('all');
   const [selectedContainerFilter, setSelectedContainerFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'seq' | 'weight' | 'name' | 'z' | 'container'>('seq');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
 
   const isJa = language === 'ja';
   const hasMultipleContainers = containers && containers.length > 1;
@@ -45,6 +57,42 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
     }
     return packedItems;
   }, [containers, hasMultipleContainers, packedItems]);
+
+  const effectiveMetrics = useMemo<PackingMetrics>(() => {
+    if (metrics) return metrics;
+    const vol = allPackedItems.reduce((s, p) => s + (p.length * p.width * p.height) / 1e9, 0);
+    const contVol = (container.length * container.width * container.height) / 1e9;
+    const wt = allPackedItems.reduce((s, p) => s + p.weight, 0);
+    return {
+      containerVolumeCbm: contVol,
+      packedVolumeCbm: vol,
+      freeVolumeCbm: Math.max(0, contVol - vol),
+      volumeUtilization: contVol > 0 ? (vol / contVol) * 100 : 0,
+      containerMaxWeightKg: container.maxWeight,
+      packedWeightKg: wt,
+      weightUtilization: container.maxWeight > 0 ? (wt / container.maxWeight) * 100 : 0,
+      totalItemCount: allPackedItems.length,
+      packedCount: allPackedItems.length,
+      unplacedCount: unplacedItems.reduce((s, u) => s + u.count, 0),
+      centerOfGravity: {
+        x: container.length / 2,
+        y: container.width / 2,
+        z: container.height / 2,
+        offsetXPercent: 0,
+        offsetYPercent: 0,
+        offsetZPercent: 0
+      },
+      axleDistribution: {
+        frontAxlePercent: 50,
+        rearAxlePercent: 50,
+        frontAxleKg: wt / 2,
+        rearAxleKg: wt / 2
+      },
+      calculationTimeMs: 0,
+      algorithm: 'extreme_points_bfd',
+      containersNeeded: 1
+    };
+  }, [metrics, allPackedItems, container, unplacedItems]);
 
   // Extract unique layers
   const layers = useMemo(() => {
@@ -234,11 +282,23 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
             ))}
           </select>
 
+          {/* PDF Manifest Export Button */}
+          <button
+            type="button"
+            id="export-pdf-manifest-btn"
+            onClick={() => setIsPdfModalOpen(true)}
+            title={isJa ? '現場用PDF作業指示書・マニフェストを出力' : 'Export Warehouse PDF Manifest & Stowage Plan'}
+            className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>{isJa ? 'PDF作業指示書' : 'Export PDF'}</span>
+          </button>
+
           {/* CSV Download Button */}
           <button
             onClick={handleExportManifestCsv}
             title={isJa ? 'マニフェストCSV出力' : 'Export Loading Manifest'}
-            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1.5 transition-colors"
+            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-blue-600" />
             <span>{isJa ? 'CSV出力' : 'CSV'}</span>
@@ -248,7 +308,7 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
           <button
             onClick={handlePrint}
             title={isJa ? '作業指示書を印刷' : 'Print Loading Sheet'}
-            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1.5 transition-colors"
+            className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Printer className="w-3.5 h-3.5 text-emerald-600" />
             <span>{isJa ? '印刷' : 'Print'}</span>
@@ -458,6 +518,23 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Warehouse PDF Export Modal */}
+      <WarehousePdfExportModal
+        isOpen={isPdfModalOpen}
+        onClose={() => setIsPdfModalOpen(false)}
+        container={container}
+        containers={containers}
+        packedItems={packedItems}
+        metrics={effectiveMetrics}
+        overallMetrics={overallMetrics}
+        unplacedItems={unplacedItems}
+        activeContainerIndex={activeContainerIndex}
+        language={language}
+        unitSystem={unitSystem}
+        algorithmName={algorithmName}
+        hasManualAdjustments={hasManualAdjustments}
+      />
     </div>
   );
 };

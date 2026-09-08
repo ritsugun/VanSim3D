@@ -361,7 +361,7 @@ function packSingleContainerWithGenes(
       const layerNumber = Math.floor(point.z / (orientation.height || 100)) + 1;
 
       const newPackedItem: PackedItem = {
-        id: `packed_c${containerIndex + 1}_${packedItems.length + 1}`,
+        id: `packed_c${containerIndex}_${packedItems.length + 1}`,
         cargoItemId: safeCargo.id,
         sku: safeCargo.sku,
         name: safeCargo.name,
@@ -779,7 +779,7 @@ function packSingleContainerBlockBuilding(
               const posZ = placementPoint.z + iz * ori.height;
 
               const packed: PackedItem = {
-                id: `packed_c${containerIndex + 1}_${packedItems.length + 1}`,
+                id: `packed_c${containerIndex}_${packedItems.length + 1}`,
                 cargoItemId: sampleItem.id,
                 sku: sampleItem.sku,
                 name: sampleItem.name,
@@ -863,7 +863,7 @@ function packSingleContainerBlockBuilding(
         if (!checkSupportAndStacking(cand, packedItems)) continue;
 
         const packed: PackedItem = {
-          id: `packed_c${containerIndex + 1}_${packedItems.length + 1}`,
+          id: `packed_c${containerIndex}_${packedItems.length + 1}`,
           cargoItemId: cargo.id,
           sku: cargo.sku,
           name: cargo.name,
@@ -1085,7 +1085,7 @@ function packSingleContainerBeamSearch(
 
             // Form next candidate state
             const newPackedItem: PackedItem = {
-              id: `packed_c${containerIndex + 1}_${state.packedItems.length + 1}`,
+              id: `packed_c${containerIndex}_${state.packedItems.length + 1}`,
               cargoItemId: cargo.id,
               sku: cargo.sku,
               name: cargo.name,
@@ -1752,8 +1752,8 @@ export function run3DPackingOptimizer(
   let currentSeqNumber = 0;
   const maxAllowedContainers = containerCount === 'auto' ? 25 : Math.max(1, containerCount);
 
-  let cIndex = 0;
-  while (remainingInstances.length > 0 && cIndex < maxAllowedContainers) {
+  let cIndex = 1;
+  while (remainingInstances.length > 0 && containerLoads.length < maxAllowedContainers) {
     const prevCount = remainingInstances.length;
     
     // Choose appropriate packing executor
@@ -1772,14 +1772,14 @@ export function run3DPackingOptimizer(
     cIndex++;
 
     // If user specified exact container count and we've reached it, stop
-    if (containerCount !== 'auto' && cIndex >= containerCount) {
+    if (containerCount !== 'auto' && containerLoads.length >= containerCount) {
       break;
     }
   }
 
   // If no containers were packed (e.g. 0 items), add 1 empty container load
   if (containerLoads.length === 0) {
-    const emptyResult = packSingleContainer(safeContainer, 0, [], algorithm, 0);
+    const emptyResult = packSingleContainer(safeContainer, 1, [], algorithm, 0);
     containerLoads.push(emptyResult.containerLoad);
   }
 

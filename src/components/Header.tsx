@@ -297,9 +297,19 @@ export const Header: React.FC<HeaderProps> = ({
               disabled={isCalculating}
               className="px-2.5 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all active:scale-95"
             >
-              <RefreshCw className={`w-3 h-3 ${isCalculating ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3 h-3 ${isCalculating ? 'animate-spin text-blue-400' : ''}`} />
               <span>{isCalculating ? (isJa ? '計算中...' : 'Optimizing...') : (isJa ? '再計算' : 'Re-calculate')}</span>
             </button>
+
+            {isCalculating && (
+              <div 
+                id="header-calculating-indicator"
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-600 text-white font-mono text-[10px] font-bold shadow-xs animate-pulse"
+              >
+                <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                <span>{isJa ? '演算実行中' : 'CALCULATING'}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

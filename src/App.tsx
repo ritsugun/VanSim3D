@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import confetti from 'canvas-confetti';
-import { Container, CargoItem, PackedItem, PackingResult, AlgorithmType, UnitSystem, Language, GAGoalConfig, AutoSelectCriteria } from './types';
+import { Container, CargoItem, PackedItem, PackingResult, AlgorithmType, UnitSystem, Language, GAGoalConfig, AutoSelectCriteria, UnplacedItem } from './types';
 import { STANDARD_CONTAINERS, SAMPLE_CARGO_PRESETS } from './data/presets';
 import { run3DPackingOptimizer, runAllAlgorithmsBenchmark, getBestAlgorithmForCriteria } from './services/packingOptimizer';
+import { applyManualItemPlacement, applyManualItemMove, applyManualItemRemove } from './utils/manualAdjustment';
 import { Header } from './components/Header';
 import { AlgorithmSettingsPanel } from './components/AlgorithmSettingsPanel';
 import { ContainerViewer3D } from './components/ContainerViewer3D';
@@ -15,9 +16,19 @@ import { AlgorithmComparisonModal } from './components/AlgorithmComparisonModal'
 import { 
   Box, BarChart3, ListOrdered, Truck, Sparkles, 
   Layers, Sliders, CheckCircle2, ShieldAlert, Zap, Bot,
-  AlertTriangle, ChevronDown 
+  AlertTriangle, ChevronDown, RefreshCw 
 } from 'lucide-react';
 import { applyVividColorsToCargoList, ColorPaletteId } from './utils/colors';
+
+const ALGORITHM_DISPLAY_NAMES: Record<AlgorithmType, { ja: string; en: string }> = {
+  genetic_algorithm: { ja: '遺伝的アルゴリズム (GA)', en: 'Genetic Algorithm (GA)' },
+  extreme_points_bfd: { ja: 'エクストリームポイント (EP-BFD)', en: 'Extreme Point (EP-BFD)' },
+  wall_building: { ja: 'ウォールビルディング (荷崩れ防止)', en: 'Wall Building' },
+  weight_balanced: { ja: '重量重心バランス重視', en: 'Weight Balanced' },
+  layer_stacking: { ja: 'レイヤースタッキング', en: 'Layer Stacking' },
+  block_building: { ja: 'ブロックビルディング', en: 'Block Building' },
+  beam_search: { ja: 'ビームサーチ探索', en: 'Beam Search' }
+};
 
 export default function App() {
   // Application State
@@ -67,17 +78,61 @@ export default function App() {
     : gaConfig;
 
   // Run Packing Optimization Calculation with fleet support and GA target goals
-  const packingResult: PackingResult = useMemo(() => {
+  const [packingResult, setPackingResult] = useState<PackingResult>(() => {
     const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
     return run3DPackingOptimizer(selectedContainer, cargoList, effectiveAlgorithm, countParam, effectiveGaConfig);
+  });
+
+  const [isManualMode, setIsManualMode] = useState<boolean>(false);
+
+  // Manual Adjustment handlers
+  const handleManualPlaceItem = useCallback((unplacedItem: UnplacedItem, placement: { x: number; y: number; z: number; length: number; width: number; height: number; rotationIndex?: number; color?: string; containerIndex?: number }) => {
+    const targetIdx = placement.containerIndex !== undefined 
+      ? placement.containerIndex 
+      : (activeContainerIndex === 'all' ? 1 : activeContainerIndex);
+    setPackingResult(prev => applyManualItemPlacement(prev, selectedContainer, targetIdx, unplacedItem, placement));
+  }, [selectedContainer, activeContainerIndex]);
+
+  const handleManualMoveItem = useCallback((itemId: string, newCoords: { x: number; y: number; z: number; length?: number; width?: number; height?: number; rotationIndex?: number }) => {
+    setPackingResult(prev => applyManualItemMove(prev, selectedContainer, itemId, newCoords));
+  }, [selectedContainer]);
+
+  const handleManualRemoveItem = useCallback((itemId: string) => {
+    setPackingResult(prev => applyManualItemRemove(prev, selectedContainer, itemId));
+  }, [selectedContainer]);
+
+  const handleResetToAlgorithm = useCallback(() => {
+    setIsCalculating(true);
+    setTimeout(() => {
+      const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
+      const res = run3DPackingOptimizer(selectedContainer, cargoList, effectiveAlgorithm, countParam, effectiveGaConfig);
+      setPackingResult(res);
+      setIsCalculating(false);
+    }, 60);
+  }, [selectedContainer, cargoList, effectiveAlgorithm, containerCountMode, containerCount, effectiveGaConfig]);
+
+  // Automatically trigger optimization calculation whenever inputs change, displaying the calculation in-progress status
+  useEffect(() => {
+    setIsCalculating(true);
+    const timer = setTimeout(() => {
+      const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
+      const res = run3DPackingOptimizer(selectedContainer, cargoList, effectiveAlgorithm, countParam, effectiveGaConfig);
+      setPackingResult(res);
+      setIsCalculating(false);
+    }, 70);
+
+    return () => clearTimeout(timer);
   }, [selectedContainer, cargoList, effectiveAlgorithm, containerCountMode, containerCount, effectiveGaConfig]);
 
   // Re-optimize action trigger with subtle celebration effect
   const handleReoptimize = useCallback(() => {
     setIsCalculating(true);
     setTimeout(() => {
+      const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
+      const res = run3DPackingOptimizer(selectedContainer, cargoList, effectiveAlgorithm, countParam, effectiveGaConfig);
+      setPackingResult(res);
       setIsCalculating(false);
-      if (packingResult.metrics.volumeUtilization > 75 || packingResult.metrics.unplacedCount === 0) {
+      if (res.metrics.volumeUtilization > 75 || res.metrics.unplacedCount === 0) {
         try {
           confetti({
             particleCount: 40,
@@ -88,28 +143,16 @@ export default function App() {
           // Ignore if canvas confetti unavailable
         }
       }
-    }, 250);
-  }, [packingResult]);
+    }, 300);
+  }, [selectedContainer, cargoList, effectiveAlgorithm, containerCountMode, containerCount, effectiveGaConfig]);
 
   // Apply algorithm from benchmark or selector with subtle celebration
   const handleApplyAlgorithm = useCallback((newAlgo: AlgorithmType, newGaConfig?: GAGoalConfig) => {
+    setIsAutoAlgorithmEnabled(false);
     setAlgorithm(newAlgo);
     if (newGaConfig) {
       setGaConfig(newGaConfig);
     }
-    setIsCalculating(true);
-    setTimeout(() => {
-      setIsCalculating(false);
-      try {
-        confetti({
-          particleCount: 35,
-          spread: 55,
-          origin: { y: 0.85 }
-        });
-      } catch (e) {
-        // Ignore if unavailable
-      }
-    }, 200);
   }, []);
 
   // Apply vivid color palette to all cargo items
@@ -280,6 +323,17 @@ export default function App() {
                 onSelectItem={setSelectedItem}
                 selectedItem={selectedItem}
                 onApplyVividColors={handleApplyVividColors}
+                isCalculating={isCalculating}
+                isManualMode={isManualMode}
+                onToggleManualMode={setIsManualMode}
+                hasManualAdjustments={packingResult.hasManualAdjustments}
+                manualAdjustmentsCount={packingResult.manualAdjustmentsCount}
+                onManualPlaceItem={handleManualPlaceItem}
+                onManualMoveItem={handleManualMoveItem}
+                onManualRemoveItem={handleManualRemoveItem}
+                onResetToAlgorithm={handleResetToAlgorithm}
+                unplacedItems={packingResult.unplacedItems}
+                cargoList={cargoList}
               />
             </div>
 
@@ -330,6 +384,17 @@ export default function App() {
                   onSelectItem={setSelectedItem}
                   selectedItem={selectedItem}
                   onApplyVividColors={handleApplyVividColors}
+                  isCalculating={isCalculating}
+                  isManualMode={isManualMode}
+                  onToggleManualMode={setIsManualMode}
+                  hasManualAdjustments={packingResult.hasManualAdjustments}
+                  manualAdjustmentsCount={packingResult.manualAdjustmentsCount}
+                  onManualPlaceItem={handleManualPlaceItem}
+                  onManualMoveItem={handleManualMoveItem}
+                  onManualRemoveItem={handleManualRemoveItem}
+                  onResetToAlgorithm={handleResetToAlgorithm}
+                  unplacedItems={packingResult.unplacedItems}
+                  cargoList={cargoList}
                 />
               </div>
             </div>
@@ -371,6 +436,17 @@ export default function App() {
                   onSelectItem={setSelectedItem}
                   selectedItem={selectedItem}
                   onApplyVividColors={handleApplyVividColors}
+                  isCalculating={isCalculating}
+                  isManualMode={isManualMode}
+                  onToggleManualMode={setIsManualMode}
+                  hasManualAdjustments={packingResult.hasManualAdjustments}
+                  manualAdjustmentsCount={packingResult.manualAdjustmentsCount}
+                  onManualPlaceItem={handleManualPlaceItem}
+                  onManualMoveItem={handleManualMoveItem}
+                  onManualRemoveItem={handleManualRemoveItem}
+                  onResetToAlgorithm={handleResetToAlgorithm}
+                  unplacedItems={packingResult.unplacedItems}
+                  cargoList={cargoList}
                 />
               </div>
             </div>
@@ -421,6 +497,11 @@ export default function App() {
               containers={packingResult.containers}
               activeContainerIndex={activeContainerIndex}
               onSelectContainerIndex={setActiveContainerIndex}
+              metrics={packingResult.metrics}
+              overallMetrics={packingResult.overallMetrics}
+              unplacedItems={packingResult.unplacedItems}
+              algorithmName={effectiveAlgorithm}
+              hasManualAdjustments={packingResult.hasManualAdjustments}
             />
           </div>
         )}
@@ -468,6 +549,32 @@ export default function App() {
           </span>
         </div>
       </footer>
+
+      {/* Floating Software Calculation in Progress Indicator Toast */}
+      {isCalculating && (
+        <div 
+          id="calculation-in-progress-toast"
+          className="fixed bottom-5 right-5 z-50 bg-slate-900/95 text-white backdrop-blur-md border border-slate-700/80 shadow-2xl rounded-2xl px-4 py-3 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-3 duration-200 pointer-events-none"
+        >
+          <div className="relative flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-400 rounded-full animate-spin" />
+            <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin absolute" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-xs text-slate-100">
+                {isJa ? 'ソフトが最適化演算を実行中...' : 'Optimization calculation in progress...'}
+              </span>
+              <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-ping shrink-0" />
+            </div>
+            <p className="text-[11px] text-slate-400 mt-0.5 truncate max-w-[220px]">
+              {isJa 
+                ? `${ALGORITHM_DISPLAY_NAMES[effectiveAlgorithm]?.[language] || effectiveAlgorithm} 探索中`
+                : `Computing with ${ALGORITHM_DISPLAY_NAMES[effectiveAlgorithm]?.[language] || effectiveAlgorithm}`}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
