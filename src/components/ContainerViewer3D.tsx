@@ -4,15 +4,15 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Container, PackedItem, UnitSystem, Language, ContainerLoad, UnplacedItem, CargoItem } from '../types';
 import { 
   Play, Pause, SkipBack, SkipForward, RotateCcw, 
-  Layers, Camera, Maximize2, ShieldAlert, 
+  Layers, Camera, Maximize2, Minimize2, ShieldAlert, 
   Compass, Crosshair, SlidersHorizontal, Box, Grid3X3, X,
   GripVertical, Blend, Sparkles, Palette,
   Hand, Move, RotateCw, Trash2, Magnet, Check, AlertCircle, ArrowDownToLine, 
-  RefreshCw, Undo2, ChevronDown, ChevronUp, Plus, PackagePlus
+  RefreshCw, Undo2, Redo2, ChevronDown, ChevronUp, Plus, PackagePlus, PackageMinus
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 import { VIVID_NEON_PALETTE, boostHexToVivid } from '../utils/colors';
-import { calculateSupportHeight, checkContainerBounds } from '../utils/manualAdjustment';
+import { calculateSupportHeight, checkContainerBounds, isRestingOnFragile } from '../utils/manualAdjustment';
 
 interface ContainerViewer3DProps {
   container: Container;
@@ -32,7 +32,12 @@ interface ContainerViewer3DProps {
   onManualPlaceItem?: (unplacedItem: UnplacedItem, placement: { x: number; y: number; z: number; length: number; width: number; height: number; rotationIndex?: number; color?: string; containerIndex?: number }) => void;
   onManualMoveItem?: (itemId: string, newCoords: { x: number; y: number; z: number; rotationIndex?: number; length?: number; width?: number; height?: number }) => void;
   onManualRemoveItem?: (itemId: string) => void;
+  onManualUnloadContainer?: (containerIndex?: number | 'all') => void;
   onResetToAlgorithm?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
   hasManualAdjustments?: boolean;
   manualAdjustmentsCount?: number;
   isManualMode?: boolean;
@@ -58,13 +63,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   onManualPlaceItem,
   onManualMoveItem,
   onManualRemoveItem,
+  onManualUnloadContainer,
   onResetToAlgorithm,
+  onUndo,
+  onRedo,
+  canUndo = false,
+  canRedo = false,
   hasManualAdjustments = false,
   manualAdjustmentsCount = 0,
   isManualMode: isManualModeProp,
   isManualModeActive,
   onToggleManualMode
 }) => {
+  const isJa = language === 'ja';
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -107,7 +118,44 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     width: number;
     height: number;
     isValid: boolean;
+    invalidReason?: string;
+    offsetZ?: number;
+    containerIndex?: number;
   } | null>(null);
+
+  const [confirmingUnload, setConfirmingUnload] = useState<boolean>(false);
+  const confirmTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (confirmTimeoutRef.current) {
+        clearTimeout(confirmTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Synchronize held unplaced item when unplacedItems changes or stock runs out
+  useEffect(() => {
+    if (!isManualMode) {
+      if (heldUnplacedItem) {
+        setHeldUnplacedItem(null);
+        setGhostCoords(null);
+      }
+      return;
+    }
+    if (heldUnplacedItem) {
+      const current = unplacedItems?.find(
+        u => (u.cargoItemId && u.cargoItemId === heldUnplacedItem.unplaced.cargoItemId) ||
+             (u.sku && u.sku === heldUnplacedItem.unplaced.sku)
+      );
+      if (!current || current.count <= 0) {
+        setHeldUnplacedItem(null);
+        setGhostCoords(null);
+      } else if (current.count !== heldUnplacedItem.unplaced.count) {
+        setHeldUnplacedItem(prev => prev ? { ...prev, unplaced: current } : null);
+      }
+    }
+  }, [unplacedItems, isManualMode]);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -159,6 +207,28 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [hoveredItem, setHoveredItem] = useState<PackedItem | null>(null);
   const [internalSelectedItem, setInternalSelectedItem] = useState<PackedItem | null>(null);
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+
+  // Keep internalSelectedItem in sync with packedItems updates (e.g. after undo/redo/manual move)
+  useEffect(() => {
+    if (internalSelectedItem) {
+      const found = packedItems.find(p => p.id === internalSelectedItem.id);
+      if (found) {
+        if (
+          found.x !== internalSelectedItem.x ||
+          found.y !== internalSelectedItem.y ||
+          found.z !== internalSelectedItem.z ||
+          found.rotationIndex !== internalSelectedItem.rotationIndex ||
+          found.width !== internalSelectedItem.width ||
+          found.length !== internalSelectedItem.length ||
+          found.height !== internalSelectedItem.height
+        ) {
+          setInternalSelectedItem(found);
+        }
+      } else {
+        setInternalSelectedItem(null);
+      }
+    }
+  }, [packedItems, internalSelectedItem]);
 
   // Drag-and-drop state for floating Controls panel
   const viewerWrapperRef = useRef<HTMLDivElement>(null);
@@ -246,12 +316,186 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     };
   }, [isDragging]);
 
-  const activeSelectedItem = externalSelectedItem || internalSelectedItem;
+  // Toggle Full Screen handler supporting both native Fullscreen API and CSS-based fullscreen fallback
+  const toggleFullScreen = useCallback(async () => {
+    const wrapper = viewerWrapperRef.current;
+    if (!wrapper) return;
+
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch (err) {
+        console.warn('Exit fullscreen failed:', err);
+      }
+      setIsFullScreen(false);
+    } else {
+      try {
+        if (wrapper.requestFullscreen) {
+          await wrapper.requestFullscreen();
+          setIsFullScreen(true);
+        } else {
+          setIsFullScreen(prev => !prev);
+        }
+      } catch (err) {
+        // In environments/iframes where requestFullscreen is blocked or unsupported, fallback to full-viewport CSS
+        console.info('Native requestFullscreen failed or blocked by sandbox, using CSS fullscreen:', err);
+        setIsFullScreen(prev => !prev);
+      }
+    }
+  }, []);
+
+  // Listen to native fullscreen changes and ESC key
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullScreen(Boolean(document.fullscreenElement));
+      setTimeout(() => {
+        window.dispatchEvent(new Event('resize'));
+      }, 100);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullScreen && !document.fullscreenElement) {
+        setIsFullScreen(false);
+        setTimeout(() => {
+          window.dispatchEvent(new Event('resize'));
+        }, 100);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFullScreen]);
+
+  // Trigger resize observer event when isFullScreen toggles so Three.js camera & canvas immediately adapt
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      window.dispatchEvent(new Event('resize'));
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [isFullScreen]);
+
+  const rawSelectedItem = externalSelectedItem || internalSelectedItem;
+  const activeSelectedItem = useMemo(() => {
+    if (!rawSelectedItem) return null;
+    const found = packedItems.find(p => p.id === rawSelectedItem.id);
+    return found || rawSelectedItem;
+  }, [rawSelectedItem, packedItems]);
+
+  const activeSelectedItemRef = useRef<PackedItem | null>(activeSelectedItem);
+  activeSelectedItemRef.current = activeSelectedItem;
+
+  // Drop selected cargo to nearest underlying support (floor or top of underlying box)
+  const handleDropItemToSupport = useCallback((targetItem?: PackedItem | null) => {
+    const raw = targetItem || activeSelectedItemRef.current || activeSelectedItem;
+    if (!raw || !onManualMoveItem) return;
+    const item = packedItems.find(p => p.id === raw.id) || raw;
+
+    // Find container items
+    const activeContLoad = (containers && containers.length > 0)
+      ? (containers.find(c => c.containerIndex === (item.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1))) || containers[0])
+      : null;
+    const contItems = activeContLoad ? activeContLoad.packedItems : packedItems;
+
+    const targetZ = calculateSupportHeight(
+      item.x,
+      item.y,
+      item.length,
+      item.width,
+      contItems,
+      item.id
+    );
+
+    if (item.z === targetZ) {
+      showToast(isJa ? `「${item.name}」は既に最下部（Z: ${targetZ}mm）に接地しています` : `"${item.name}" is already resting at Z: ${targetZ}mm`);
+      return;
+    }
+
+    const updated = {
+      ...item,
+      z: targetZ
+    };
+    activeSelectedItemRef.current = updated;
+
+    onManualMoveItem(item.id, {
+      x: item.x,
+      y: item.y,
+      z: targetZ
+    });
+
+    if (onSelectItem) {
+      onSelectItem(updated);
+    }
+
+    showToast(isJa 
+      ? `「${item.name}」を直下（Z: ${targetZ}mm）へ着地させました` 
+      : `Dropped "${item.name}" to Z: ${targetZ}mm`);
+  }, [activeSelectedItem, onManualMoveItem, containers, currentTab, packedItems, isJa, showToast, onSelectItem]);
+
+  // Unload all cargo items in the active container (or all containers) to unplaced tray
+  const handleUnloadContainerAll = useCallback(() => {
+    if (!onManualUnloadContainer) return;
+
+    const targetContIdx = currentTab === 'all' ? 'all' : (typeof currentTab === 'number' ? currentTab : 1);
+    const itemsInTarget = packedItems.filter(p => {
+      if (targetContIdx === 'all') return true;
+      return (p.containerIndex || 1) === targetContIdx;
+    });
+
+    if (itemsInTarget.length === 0) {
+      showToast(isJa ? '現在コンテナ内に配置されている貨物はありません' : 'No cargo currently loaded in container');
+      return;
+    }
+
+    if (!confirmingUnload) {
+      setConfirmingUnload(true);
+      showToast(isJa 
+        ? `【確認】もう一度「一括アンロード」を押すと、${targetContIdx === 'all' ? '全コンテナ' : `コンテナ #${targetContIdx}`}内の全${itemsInTarget.length}個の貨物をアンロードします` 
+        : `Click "Unload All" again to unload ${itemsInTarget.length} items from ${targetContIdx === 'all' ? 'all containers' : `Container #${targetContIdx}`}`);
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = setTimeout(() => {
+        setConfirmingUnload(false);
+      }, 4000);
+      return;
+    }
+
+    // User confirmed
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    setConfirmingUnload(false);
+
+    onManualUnloadContainer(targetContIdx);
+    setInternalSelectedItem(null);
+    activeSelectedItemRef.current = null;
+    if (onSelectItem) onSelectItem(null);
+    setHeldUnplacedItem(null);
+    setIsDraggingExistingItem(null);
+    setGhostCoords(null);
+    setIsTrayCollapsed(false); // Automatically open cargo tray for manual packing
+
+    showToast(isJa 
+      ? `コンテナ内の全${itemsInTarget.length}個の貨物を一括アンロードしました。トレイから自由に積載できます (Ctrl+Zで復元可能)` 
+      : `Unloaded all ${itemsInTarget.length} items to tray. Ready for manual placement (Ctrl+Z to undo)`);
+  }, [onManualUnloadContainer, currentTab, packedItems, confirmingUnload, isJa, showToast, onSelectItem]);
 
   // Max weight for weight color mapping
   const maxItemWeight = useMemo(() => {
     return Math.max(1, ...activeItemsToDisplay.map(p => p.weight));
   }, [activeItemsToDisplay]);
+
+  // Single container volume utilization for quick badge display
+  const singleContainerUtilization = useMemo(() => {
+    if (containers && containers.length > 0) {
+      return containers[0].metrics?.volumeUtilization || 0;
+    }
+    const contVol = container.length * container.width * container.height;
+    if (contVol <= 0) return 0;
+    const packedVol = packedItems.reduce((acc, item) => acc + (item.length * item.width * item.height), 0);
+    return Math.min(100, (packedVol / contVol) * 100);
+  }, [containers, container, packedItems]);
 
   // Sync currentStep when items change
   useEffect(() => {
@@ -794,10 +1038,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const edgeLines = new THREE.LineSegments(edgesGeo, edgeLineMat);
     group.add(edgeLines);
 
+    const activeOffsetZ = ghostCoords.offsetZ !== undefined ? ghostCoords.offsetZ : targetOffsetZ;
     group.position.set(
       (ghostCoords.x + ghostCoords.length / 2) / 1000,
       (ghostCoords.z + ghostCoords.height / 2) / 1000,
-      (ghostCoords.y + ghostCoords.width / 2) / 1000 + targetOffsetZ
+      (ghostCoords.y + ghostCoords.width / 2) / 1000 + activeOffsetZ
     );
     group.visible = true;
   }, [isManualMode, ghostCoords, currentTab, containers, container]);
@@ -847,9 +1092,22 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       }
 
       const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
-      const targetCont0 = typeof currentTab === 'number' ? Math.max(0, currentTab - 1) : 0;
-      const spacingM = (container.width / 1000) + 1.2;
-      const targetOffsetZ = isSideBySide ? targetCont0 * spacingM : 0;
+      const widM = container.width / 1000;
+      const spacingM = widM + 1.2;
+
+      let targetContNum = typeof currentTab === 'number' ? currentTab : 1;
+      let targetOffsetZ = 0;
+
+      if (isSideBySide && containers && containers.length > 1) {
+        // Calculate which container hitPoint.z is nearest to
+        const approxIdx = Math.floor((hitPoint.z + 0.6) / spacingM);
+        const clampedIdx = Math.max(0, Math.min(containers.length - 1, approxIdx));
+        targetOffsetZ = clampedIdx * spacingM;
+        targetContNum = containers[clampedIdx].containerIndex ?? (clampedIdx + 1);
+      } else if (typeof currentTab === 'number') {
+        targetContNum = currentTab;
+        targetOffsetZ = 0;
+      }
 
       const isRot = itemDim.rotation === 1;
       const length = isRot ? itemDim.width : itemDim.length;
@@ -867,14 +1125,35 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       rawX = Math.max(0, Math.min(container.length - length, rawX));
       rawY = Math.max(0, Math.min(container.width - width, rawY));
 
-      const activeContLoad = (containers && typeof currentTab === 'number')
-        ? (containers.find(c => c.containerIndex === currentTab) || containers[targetCont0])
-        : (containers ? containers[0] : null);
+      const activeContLoad = (containers && containers.length > 0)
+        ? (containers.find(c => c.containerIndex === targetContNum) || containers[0])
+        : null;
       const contItems = activeContLoad ? activeContLoad.packedItems : packedItems;
       const ignoreId = isDraggingExistingItem ? isDraggingExistingItem.id : undefined;
       const rawZ = calculateSupportHeight(rawX, rawY, length, width, contItems, ignoreId);
 
       const bounds = checkContainerBounds(rawX, rawY, rawZ, length, width, height, container);
+      const restingOnFragile = isRestingOnFragile(rawX, rawY, rawZ, length, width, contItems, ignoreId);
+
+      // Check container payload capacity if maxWeight is defined
+      const itemWeight = heldUnplacedItem?.unplaced.weight ?? isDraggingExistingItem?.weight ?? 0;
+      const currentContWeight = contItems.reduce((s, i) => (ignoreId && i.id === ignoreId ? s : s + i.weight), 0);
+      const exceedsWeight = container.maxWeight > 0 && (currentContWeight + itemWeight) > container.maxWeight;
+
+      let invalidReason: string | undefined;
+      if (!bounds.isValid) {
+        if (bounds.exceedsHeight) {
+          invalidReason = language === 'ja' ? 'コンテナの天井高さを超過しています' : 'Exceeds container ceiling height';
+        } else {
+          invalidReason = language === 'ja' ? 'コンテナの境界寸法を超過しています' : 'Exceeds container boundary dimensions';
+        }
+      } else if (restingOnFragile) {
+        invalidReason = language === 'ja' ? '割れ物（Fragile）指定の荷物の上には積載できません' : 'Cannot stack on top of fragile cargo';
+      } else if (exceedsWeight) {
+        invalidReason = language === 'ja' ? 'コンテナの最大積載重量を超過します' : 'Exceeds container max weight limit';
+      }
+
+      const isValid = bounds.isValid && !restingOnFragile && !exceedsWeight;
 
       return {
         x: rawX,
@@ -883,7 +1162,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         length,
         width,
         height,
-        isValid: bounds.isValid
+        isValid,
+        invalidReason,
+        offsetZ: targetOffsetZ,
+        containerIndex: targetContNum
       };
     };
 
@@ -935,8 +1217,50 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       }
     };
 
+    let mouseDownPos = { x: 0, y: 0 };
+    const handleMouseDown = (event: MouseEvent) => {
+      mouseDownPos = { x: event.clientX, y: event.clientY };
+    };
+
     const handleClick = (event: MouseEvent) => {
-      // If holding an unplaced item in manual mode, click places it!
+      // Ignore click if user was dragging/orbiting the camera (moved > 5px)
+      const dx = Math.abs(event.clientX - mouseDownPos.x);
+      const dy = Math.abs(event.clientY - mouseDownPos.y);
+      if (dx > 5 || dy > 5) return;
+
+      // 1. Repositioning existing item in manual mode
+      if (isManualMode && isDraggingExistingItem && onManualMoveItem) {
+        const itemDim = {
+          length: isDraggingExistingItem.length,
+          width: isDraggingExistingItem.width,
+          height: isDraggingExistingItem.height,
+          rotation: 0
+        };
+        const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim);
+        if (place) {
+          if (!place.isValid) {
+            showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot move item: exceeds container constraints'));
+            return;
+          }
+          onManualMoveItem(isDraggingExistingItem.id, {
+            x: place.x,
+            y: place.y,
+            z: place.z,
+            length: place.length,
+            width: place.width,
+            height: place.height,
+            rotationIndex: isDraggingExistingItem.rotationIndex
+          });
+          showToast(language === 'ja'
+            ? `「${isDraggingExistingItem.name}」の位置を変更しました (X:${place.x} Y:${place.y} Z:${place.z}mm)`
+            : `Moved "${isDraggingExistingItem.name}" to (X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
+          setIsDraggingExistingItem(null);
+          setGhostCoords(null);
+          return;
+        }
+      }
+
+      // 2. If holding an unplaced item in manual mode, click places it
       if (isManualMode && heldUnplacedItem && onManualPlaceItem) {
         const itemDim = {
           length: heldUnplacedItem.unplaced.dimensions.length,
@@ -946,7 +1270,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         };
         const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim);
         if (place) {
-          const targetContNum = typeof currentTab === 'number' ? currentTab : 1;
+          if (!place.isValid) {
+            showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot place item: exceeds container limits'));
+            return;
+          }
+
+          const targetContNum = place.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1);
           onManualPlaceItem(heldUnplacedItem.unplaced, {
             x: place.x,
             y: place.y,
@@ -959,18 +1288,26 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             containerIndex: targetContNum
           });
           showToast(language === 'ja' 
-            ? `「${heldUnplacedItem.unplaced.name}」を手動配置しました (X:${place.x} Y:${place.y} Z:${place.z}mm)`
-            : `Manually placed "${heldUnplacedItem.unplaced.name}" at (X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
+            ? `「${heldUnplacedItem.unplaced.name}」を手動配置しました (コンテナ#${targetContNum} X:${place.x} Y:${place.y} Z:${place.z}mm)`
+            : `Manually placed "${heldUnplacedItem.unplaced.name}" (Cont #${targetContNum} X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
           
           if (heldUnplacedItem.unplaced.count <= 1) {
             setHeldUnplacedItem(null);
             setGhostCoords(null);
+          } else {
+            setHeldUnplacedItem(prev => prev ? {
+              ...prev,
+              unplaced: {
+                ...prev.unplaced,
+                count: prev.unplaced.count - 1
+              }
+            } : null);
           }
           return;
         }
       }
 
-      // Normal selection click
+      // Normal selection click: Raycast cargo boxes
       const rect = containerEl.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -982,62 +1319,249 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       if (intersects.length > 0) {
         const targetMesh = intersects[0].object as THREE.Mesh;
         const item = targetMesh.userData.packedItem as PackedItem;
-        setInternalSelectedItem(item);
-        if (onSelectItem) onSelectItem(item);
+        const currentlySelected = externalSelectedItem || internalSelectedItem;
+        // Toggle selection: clicking the already selected item closes the tooltip
+        if (currentlySelected?.id === item.id) {
+          setInternalSelectedItem(null);
+          activeSelectedItemRef.current = null;
+          if (onSelectItem) onSelectItem(null);
+        } else {
+          setInternalSelectedItem(item);
+          activeSelectedItemRef.current = item;
+          if (onSelectItem) onSelectItem(item);
+        }
       } else {
+        // Clicking empty space closes the tooltip
         setInternalSelectedItem(null);
+        activeSelectedItemRef.current = null;
         if (onSelectItem) onSelectItem(null);
       }
     };
 
-    // Keyboard shortcuts for Manual Mode
+    // HTML5 Drag & Drop event handlers on 3D Container
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      if (isManualMode && draggedUnplacedRef.current) {
+        const itemDim = {
+          length: draggedUnplacedRef.current.unplaced.dimensions.length,
+          width: draggedUnplacedRef.current.unplaced.dimensions.width,
+          height: draggedUnplacedRef.current.unplaced.dimensions.height,
+          rotation: draggedUnplacedRef.current.rotation
+        };
+        const result = calculatePlacementAtMouse(e.clientX, e.clientY, itemDim);
+        if (result) {
+          setGhostCoords(result);
+          containerEl.style.cursor = 'copy';
+        }
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      if (isManualMode && draggedUnplacedRef.current && onManualPlaceItem) {
+        const dragged = draggedUnplacedRef.current;
+        const itemDim = {
+          length: dragged.unplaced.dimensions.length,
+          width: dragged.unplaced.dimensions.width,
+          height: dragged.unplaced.dimensions.height,
+          rotation: dragged.rotation
+        };
+        const place = calculatePlacementAtMouse(e.clientX, e.clientY, itemDim);
+        if (place) {
+          if (!place.isValid) {
+            showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot drop item: exceeds container limits'));
+            setGhostCoords(null);
+            draggedUnplacedRef.current = null;
+            return;
+          }
+
+          const targetContNum = place.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1);
+          onManualPlaceItem(dragged.unplaced, {
+            x: place.x,
+            y: place.y,
+            z: place.z,
+            length: place.length,
+            width: place.width,
+            height: place.height,
+            rotationIndex: dragged.rotation,
+            color: dragged.color,
+            containerIndex: targetContNum
+          });
+          showToast(language === 'ja' 
+            ? `「${dragged.unplaced.name}」をドロップ配置しました (コンテナ#${targetContNum} X:${place.x} Y:${place.y} Z:${place.z}mm)`
+            : `Dropped "${dragged.unplaced.name}" (Cont #${targetContNum} X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
+        }
+        setGhostCoords(null);
+        draggedUnplacedRef.current = null;
+      }
+    };
+
+    // Keyboard shortcuts for Manual Mode & Tooltip closing
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Guard: Ignore shortcuts if the user is typing into an input field, textarea or select
+      const targetEl = e.target as HTMLElement | null;
+      const tagName = (targetEl?.tagName || '').toLowerCase();
+      if (tagName === 'input' || tagName === 'textarea' || tagName === 'select' || targetEl?.isContentEditable) {
+        return;
+      }
+
+      // Undo: Ctrl+Z / Cmd+Z (without Shift)
+      if (isManualMode && (e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+        e.preventDefault();
+        if (canUndo && onUndo) {
+          onUndo();
+          setHeldUnplacedItem(null);
+          setIsDraggingExistingItem(null);
+          setGhostCoords(null);
+          showToast(language === 'ja' ? '操作を元に戻しました (Ctrl+Z)' : 'Undid adjustment (Ctrl+Z)');
+        }
+        return;
+      }
+
+      // Redo: Ctrl+Y, or Ctrl+Shift+Z / Cmd+Shift+Z
+      if (
+        isManualMode && (
+          ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) ||
+          ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && e.shiftKey)
+        )
+      ) {
+        e.preventDefault();
+        if (canRedo && onRedo) {
+          onRedo();
+          setHeldUnplacedItem(null);
+          setIsDraggingExistingItem(null);
+          setGhostCoords(null);
+          showToast(language === 'ja' ? '操作をやり直しました (Ctrl+Y)' : 'Redid adjustment (Ctrl+Y)');
+        }
+        return;
+      }
+
+      const rawTarget = externalSelectedItem || internalSelectedItem;
+      const currentSelected = (activeSelectedItemRef.current && rawTarget && activeSelectedItemRef.current.id === rawTarget.id)
+        ? activeSelectedItemRef.current
+        : (rawTarget ? (packedItems.find(p => p.id === rawTarget.id) || rawTarget) : null);
+
       if (e.key === 'r' || e.key === 'R') {
         if (heldUnplacedItem) {
           setHeldUnplacedItem(prev => prev ? { ...prev, rotation: prev.rotation === 0 ? 1 : 0 } : null);
-        } else if (isManualMode && (externalSelectedItem || internalSelectedItem) && onManualMoveItem) {
-          const item = externalSelectedItem || internalSelectedItem;
-          if (item) {
-            onManualMoveItem(item.id, {
-              x: item.x,
-              y: item.y,
-              z: item.z,
-              length: item.width,
-              width: item.length,
-              height: item.height,
-              rotationIndex: (item.rotationIndex + 1) % 6
-            });
-            showToast(language === 'ja' ? `「${item.name}」を90°回転しました` : `Rotated "${item.name}" 90°`);
+        } else if (isManualMode && currentSelected && onManualMoveItem) {
+          e.preventDefault();
+          const nextRot = (currentSelected.rotationIndex + 1) % 6;
+          const updatedItem = {
+            ...currentSelected,
+            length: currentSelected.width,
+            width: currentSelected.length,
+            rotationIndex: nextRot
+          };
+          activeSelectedItemRef.current = updatedItem;
+          onManualMoveItem(currentSelected.id, {
+            x: currentSelected.x,
+            y: currentSelected.y,
+            z: currentSelected.z,
+            length: currentSelected.width,
+            width: currentSelected.length,
+            height: currentSelected.height,
+            rotationIndex: nextRot
+          });
+          if (onSelectItem) onSelectItem(updatedItem);
+          showToast(language === 'ja' ? `「${currentSelected.name}」を90°回転しました` : `Rotated "${currentSelected.name}" 90°`);
+        }
+      } else if (e.key === ' ' || e.key === 'd' || e.key === 'D') {
+        // Space or 'D': Gravity Drop selected item to nearest support/floor
+        if (isManualMode && currentSelected) {
+          e.preventDefault();
+          handleDropItemToSupport(currentSelected);
+        }
+      } else if (
+        isManualMode && 
+        currentSelected && 
+        onManualMoveItem &&
+        ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.key)
+      ) {
+        // Arrow Keys & PageUp/PageDown Nudge fine adjustment
+        e.preventDefault();
+        const baseStep = gridSnapMm > 0 ? gridSnapMm : 50;
+
+        let dx = 0;
+        let dy = 0;
+        let dz = 0;
+
+        if (e.key === 'PageUp' || (e.shiftKey && e.key === 'ArrowUp')) {
+          dz = baseStep; // Elevation Up
+        } else if (e.key === 'PageDown' || (e.shiftKey && e.key === 'ArrowDown')) {
+          dz = -baseStep; // Elevation Down
+        } else if (e.key === 'ArrowUp') {
+          dx = -baseStep; // Inward (towards front/depth of container)
+        } else if (e.key === 'ArrowDown') {
+          dx = baseStep; // Outward (towards container doors)
+        } else if (e.key === 'ArrowLeft') {
+          dy = -baseStep; // Move Left
+        } else if (e.key === 'ArrowRight') {
+          dy = baseStep; // Move Right
+        }
+
+        const maxX = Math.max(0, container.length - currentSelected.length);
+        const maxY = Math.max(0, container.width - currentSelected.width);
+        const maxZ = Math.max(0, container.height - currentSelected.height);
+
+        const newX = Math.max(0, Math.min(maxX, currentSelected.x + dx));
+        const newY = Math.max(0, Math.min(maxY, currentSelected.y + dy));
+        const newZ = Math.max(0, Math.min(maxZ, currentSelected.z + dz));
+
+        if (newX !== currentSelected.x || newY !== currentSelected.y || newZ !== currentSelected.z) {
+          const updatedItem = {
+            ...currentSelected,
+            x: newX,
+            y: newY,
+            z: newZ
+          };
+          activeSelectedItemRef.current = updatedItem;
+          onManualMoveItem(currentSelected.id, { x: newX, y: newY, z: newZ });
+          if (onSelectItem) {
+            onSelectItem(updatedItem);
           }
         }
       } else if (e.key === 'Escape') {
         setHeldUnplacedItem(null);
         setIsDraggingExistingItem(null);
         setGhostCoords(null);
+        setInternalSelectedItem(null);
+        activeSelectedItemRef.current = null;
+        if (onSelectItem) onSelectItem(null);
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && isManualMode) {
-        const item = externalSelectedItem || internalSelectedItem;
-        if (item && onManualRemoveItem) {
-          onManualRemoveItem(item.id);
+        if (currentSelected && onManualRemoveItem) {
+          onManualRemoveItem(currentSelected.id);
           setInternalSelectedItem(null);
+          activeSelectedItemRef.current = null;
           if (onSelectItem) onSelectItem(null);
-          showToast(language === 'ja' ? `「${item.name}」を未積載リストに戻しました` : `Returned "${item.name}" to unplaced list`);
+          showToast(language === 'ja' ? `「${currentSelected.name}」を未積載リストに戻しました` : `Returned "${currentSelected.name}" to unplaced list`);
         }
       }
     };
 
+    containerEl.addEventListener('mousedown', handleMouseDown);
     containerEl.addEventListener('mousemove', handleMouseMove);
     containerEl.addEventListener('click', handleClick);
+    containerEl.addEventListener('dragover', handleDragOver);
+    containerEl.addEventListener('drop', handleDrop);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
+      containerEl.removeEventListener('mousedown', handleMouseDown);
       containerEl.removeEventListener('mousemove', handleMouseMove);
       containerEl.removeEventListener('click', handleClick);
+      containerEl.removeEventListener('dragover', handleDragOver);
+      containerEl.removeEventListener('drop', handleDrop);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [
     isManualMode, heldUnplacedItem, isDraggingExistingItem, currentTab, containers, 
     container, gridSnapMm, onManualPlaceItem, onManualMoveItem, onManualRemoveItem, 
-    onSelectItem, externalSelectedItem, internalSelectedItem, language, showToast, packedItems
+    onSelectItem, externalSelectedItem, internalSelectedItem, language, showToast, packedItems,
+    onUndo, onRedo, canUndo, canRedo, handleDropItemToSupport
   ]);
 
   // Camera preset views
@@ -1087,15 +1611,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     link.click();
   };
 
-  const isJa = language === 'ja';
   const hasMultipleContainers = containers && containers.length > 1;
 
   return (
     <div 
       ref={viewerWrapperRef}
       id="container-viewer-3d-root" 
-      className={`relative flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs text-slate-800 ${
-        isFullScreen ? 'fixed inset-0 z-50 rounded-none' : 'w-full h-full min-h-[580px]'
+      className={`flex flex-col bg-white border border-slate-200 overflow-hidden shadow-xs text-slate-800 transition-all ${
+        isFullScreen 
+          ? '!fixed !inset-0 !w-screen !h-screen !z-[99999] rounded-none !m-0 !p-0 border-none' 
+          : 'relative w-full h-full min-h-[580px] rounded-xl'
       }`}
     >
       {/* 3D Canvas Viewport */}
@@ -1128,7 +1653,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           <Box className="w-4 h-4 text-blue-600 shrink-0" />
           <span className="font-semibold text-slate-900">{container.name}</span>
 
-          {hasMultipleContainers && (
+          {hasMultipleContainers ? (
             <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
               {containers.map((cLoad, idx) => {
                 const cIndex = cLoad.containerIndex || (idx + 1);
@@ -1159,6 +1684,17 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               >
                 <Grid3X3 className="w-3 h-3" />
                 <span>{isJa ? '全台並列' : 'Side-by-Side'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
+              <button
+                type="button"
+                onClick={() => setTab(1)}
+                title={isJa ? `コンテナ #1 (容積充填率: ${singleContainerUtilization.toFixed(1)}%)` : `Container #1 (Volume Utilization: ${singleContainerUtilization.toFixed(1)}%)`}
+                className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-900 text-white shadow-xs transition-all cursor-default"
+              >
+                #1 ({singleContainerUtilization.toFixed(0)}%)
               </button>
             </div>
           )}
@@ -1242,11 +1778,18 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           </button>
           <button
             id="fullscreen-3d-btn"
-            onClick={() => setIsFullScreen(!isFullScreen)}
-            title={isJa ? '全画面表示' : 'Full Screen'}
-            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600 transition-colors"
+            onClick={toggleFullScreen}
+            title={isJa 
+              ? (isFullScreen ? '全画面表示を解除 (Esc)' : '全画面表示') 
+              : (isFullScreen ? 'Exit Full Screen (Esc)' : 'Full Screen')
+            }
+            className={`p-1.5 rounded-md transition-colors ${
+              isFullScreen 
+                ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-xs' 
+                : 'hover:bg-slate-100 text-slate-600'
+            }`}
           >
-            <Maximize2 className="w-3.5 h-3.5" />
+            {isFullScreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
@@ -1270,15 +1813,65 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     ? `配置位置を選択中: 「${heldUnplacedItem.unplaced.name}」 3Dビュー内をクリックで配置確定 / [R]で回転` 
                     : `Positioning "${heldUnplacedItem.unplaced.name}" - Click 3D view to place / [R] to rotate`}
                 </span>
+              ) : activeSelectedItem ? (
+                <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0 border border-black/15" style={{ backgroundColor: activeSelectedItem.color }} />
+                  {isJa
+                    ? `「${activeSelectedItem.name}」選択中: [↑↓←→] 微動 / [Shift+↑↓] 昇降 / [Space] 着地 / [R] 回転`
+                    : `"${activeSelectedItem.name}" selected: [Arrows] Nudge / [Shift+Up/Dn] Elevate / [Space] Drop / [R] Rotate`}
+                </span>
               ) : (
                 isJa 
-                  ? '未積載トレイの荷物をクリックまたはドラッグして3Dコンテナ内の任意位置に配置できます (アルゴリズム配置を上書き)' 
-                  : 'Click or drag items from the tray into the 3D container to override the algorithm placement'
+                  ? '未積載トレイの荷物を配置、または積載済みの荷物をクリックして選択（矢印キー微動・Spaceで着地）' 
+                  : 'Place tray items, or click packed cargo to select (Arrow keys nudge, Space to drop)'
               )}
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Undo / Redo buttons */}
+            <div className="flex items-center gap-0.5 bg-white border border-amber-300 rounded-md p-0.5 shadow-2xs">
+              <button
+                id="banner-undo-btn"
+                type="button"
+                disabled={!canUndo}
+                onClick={() => {
+                  if (canUndo && onUndo) {
+                    onUndo();
+                    setHeldUnplacedItem(null);
+                    setIsDraggingExistingItem(null);
+                    setGhostCoords(null);
+                    showToast(isJa ? '操作を元に戻しました (Ctrl+Z)' : 'Undid adjustment (Ctrl+Z)');
+                  }
+                }}
+                title={isJa ? '元に戻す (ショートカット: Ctrl+Z / ⌘Z)' : 'Undo (Shortcut: Ctrl+Z / ⌘Z)'}
+                className="px-2 py-1 rounded text-slate-800 hover:bg-amber-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer disabled:pointer-events-none"
+              >
+                <Undo2 className="w-3.5 h-3.5 text-amber-800" />
+                <span>{isJa ? '元に戻す' : 'Undo'}</span>
+              </button>
+              <div className="w-[1px] h-3.5 bg-amber-200" />
+              <button
+                id="banner-redo-btn"
+                type="button"
+                disabled={!canRedo}
+                onClick={() => {
+                  if (canRedo && onRedo) {
+                    onRedo();
+                    setHeldUnplacedItem(null);
+                    setIsDraggingExistingItem(null);
+                    setGhostCoords(null);
+                    showToast(isJa ? '操作をやり直しました (Ctrl+Y)' : 'Redid adjustment (Ctrl+Y)');
+                  }
+                }}
+                title={isJa ? 'やり直す (ショートカット: Ctrl+Y / ⌘Shift+Z)' : 'Redo (Shortcut: Ctrl+Y / ⌘Shift+Z)'}
+                className="px-2 py-1 rounded text-slate-800 hover:bg-amber-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer disabled:pointer-events-none"
+              >
+                <Redo2 className="w-3.5 h-3.5 text-amber-800" />
+                <span>{isJa ? 'やり直す' : 'Redo'}</span>
+              </button>
+            </div>
+
             {/* Rotate item */}
             <button
               id="banner-rotate-btn"
@@ -1299,11 +1892,24 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 }
               }}
               title={isJa ? '荷物を90°回転 (ショートカット: R)' : 'Rotate 90 degrees (Shortcut: R)'}
-              className="px-2 py-1 rounded-md bg-white border border-amber-300 text-slate-800 hover:bg-amber-100 flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors"
+              className="px-2 py-1 rounded-md bg-white border border-amber-300 text-slate-800 hover:bg-amber-100 flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors cursor-pointer"
             >
               <RotateCw className="w-3 h-3 text-amber-700" />
               <span>{isJa ? '90°回転 (R)' : 'Rotate (R)'}</span>
             </button>
+
+            {/* Gravity Drop (Landing) button when cargo is selected */}
+            {activeSelectedItem && (
+              <button
+                id="banner-drop-btn"
+                onClick={() => handleDropItemToSupport(activeSelectedItem)}
+                title={isJa ? '真下の床・荷物の天面まで着地 (ショートカット: Space / D)' : 'Drop onto floor or underlying cargo (Shortcut: Space / D)'}
+                className="px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors cursor-pointer"
+              >
+                <ArrowDownToLine className="w-3 h-3" />
+                <span>{isJa ? '直下へ着地 (Space)' : 'Drop (Space)'}</span>
+              </button>
+            )}
 
             {/* Grid Snap selector */}
             <div className="flex items-center gap-1 bg-white border border-amber-300 rounded-md px-2 py-0.5 text-[11px]">
@@ -1321,21 +1927,27 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               </select>
             </div>
 
-            {/* Reset to algorithm */}
-            {hasManualAdjustments && onResetToAlgorithm && (
+            {/* Unload All Cargo to unplaced tray for manual packing */}
+            {onManualUnloadContainer && (
               <button
-                id="banner-reset-auto-btn"
-                onClick={() => {
-                  if (confirm(isJa ? '手動調整をすべて破棄し、アルゴリズムの自動配置に戻しますか？' : 'Discard manual adjustments and reset to algorithm?')) {
-                    onResetToAlgorithm();
-                    showToast(isJa ? 'アルゴリズム自動配置にリセットしました' : 'Reset to algorithm placement');
-                  }
-                }}
-                className="px-2 py-1 rounded-md bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 flex items-center gap-1 text-[11px] font-semibold transition-colors"
-                title={isJa ? 'アルゴリズム自動配置に戻す' : 'Reset to algorithm placement'}
+                id="banner-unload-container-btn"
+                type="button"
+                onClick={handleUnloadContainerAll}
+                title={isJa 
+                  ? 'コンテナ内の貨物をすべて未積載トレイに戻し、手動で一から配置します (Ctrl+Zで元に戻せます)' 
+                  : 'Unload all cargo items back to tray for manual loading (Ctrl+Z to undo)'}
+                className={`px-2 py-1 rounded-md border text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1 cursor-pointer ${
+                  confirmingUnload 
+                    ? 'bg-red-600 text-white border-red-700 animate-pulse' 
+                    : 'bg-white border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300'
+                }`}
               >
-                <Undo2 className="w-3 h-3" />
-                <span>{isJa ? '自動配置に戻す' : 'Reset'}</span>
+                <PackageMinus className="w-3.5 h-3.5 text-current" />
+                <span>
+                  {confirmingUnload 
+                    ? (isJa ? '本当に空にしますか？ (クリックで確定)' : 'Confirm Unload All?') 
+                    : (isJa ? '一括アンロード (空にする)' : 'Unload All')}
+                </span>
               </button>
             )}
 
@@ -1356,39 +1968,52 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         </div>
       )}
 
-      {/* Floating Hover/Selected Box Inspector Card */}
-      {(hoveredItem || activeSelectedItem) && (
+      {/* Floating Selected Box Inspector Card (Displayed on Mouse Click) */}
+      {activeSelectedItem && (
         <div className={`absolute ${isManualMode ? 'top-26' : 'top-16'} left-3 pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs max-w-xs z-20 animate-fade-in text-slate-800`}>
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2">
             <div className="flex items-center gap-1.5 truncate">
               <span 
                 className="w-3 h-3 rounded-full shrink-0 border border-black/10" 
-                style={{ backgroundColor: (activeSelectedItem || hoveredItem)?.color }} 
+                style={{ backgroundColor: activeSelectedItem.color }} 
               />
               <span className="font-bold text-slate-900 truncate">
-                {(activeSelectedItem || hoveredItem)?.name}
+                {activeSelectedItem.name}
               </span>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {(activeSelectedItem || hoveredItem)?.isManual && (
+              {activeSelectedItem.isManual && (
                 <span className="bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-bold text-[10px] border border-amber-300 flex items-center gap-0.5">
                   <Hand className="w-2.5 h-2.5 text-amber-700" />
                   {isJa ? '手動' : 'Manual'}
                 </span>
               )}
-              {(activeSelectedItem || hoveredItem)?.containerIndex && (
+              {activeSelectedItem.containerIndex && (
                 <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-300">
-                  C#{(activeSelectedItem || hoveredItem)?.containerIndex}
+                  C#{activeSelectedItem.containerIndex}
                 </span>
               )}
               <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-300">
-                #{(activeSelectedItem || hoveredItem)?.sequenceNumber}
+                #{activeSelectedItem.sequenceNumber}
               </span>
+              <button
+                type="button"
+                id="close-cargo-inspector-card-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInternalSelectedItem(null);
+                  if (onSelectItem) onSelectItem(null);
+                }}
+                title={isJa ? '閉じる (Esc)' : 'Close (Esc)'}
+                className="ml-0.5 p-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
           {(() => {
-            const target = activeSelectedItem || hoveredItem;
+            const target = activeSelectedItem;
             if (!target) return null;
             const coords = formatCoordinates(target.x, target.y, target.z, unitSystem);
             return (
@@ -1443,10 +2068,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               if (onManualMoveItem) {
                                 const step = gridSnapMm || 50;
                                 const newX = Math.max(0, target.x - step);
+                                const updated = { ...target, x: newX };
+                                activeSelectedItemRef.current = updated;
                                 onManualMoveItem(target.id, { x: newX, y: target.y, z: target.z });
+                                if (onSelectItem) onSelectItem(updated);
                               }
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs"
+                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >-</button>
                           <button
                             type="button"
@@ -1454,10 +2082,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               if (onManualMoveItem) {
                                 const step = gridSnapMm || 50;
                                 const newX = Math.min(container.length - target.length, target.x + step);
+                                const updated = { ...target, x: newX };
+                                activeSelectedItemRef.current = updated;
                                 onManualMoveItem(target.id, { x: newX, y: target.y, z: target.z });
+                                if (onSelectItem) onSelectItem(updated);
                               }
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs"
+                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >+</button>
                         </div>
                       </div>
@@ -1472,10 +2103,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               if (onManualMoveItem) {
                                 const step = gridSnapMm || 50;
                                 const newY = Math.max(0, target.y - step);
+                                const updated = { ...target, y: newY };
+                                activeSelectedItemRef.current = updated;
                                 onManualMoveItem(target.id, { x: target.x, y: newY, z: target.z });
+                                if (onSelectItem) onSelectItem(updated);
                               }
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs"
+                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >-</button>
                           <button
                             type="button"
@@ -1483,10 +2117,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               if (onManualMoveItem) {
                                 const step = gridSnapMm || 50;
                                 const newY = Math.min(container.width - target.width, target.y + step);
+                                const updated = { ...target, y: newY };
+                                activeSelectedItemRef.current = updated;
                                 onManualMoveItem(target.id, { x: target.x, y: newY, z: target.z });
+                                if (onSelectItem) onSelectItem(updated);
                               }
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs"
+                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >+</button>
                         </div>
                       </div>
@@ -1501,10 +2138,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               if (onManualMoveItem) {
                                 const step = gridSnapMm || 50;
                                 const newZ = Math.max(0, target.z - step);
+                                const updated = { ...target, z: newZ };
+                                activeSelectedItemRef.current = updated;
                                 onManualMoveItem(target.id, { x: target.x, y: target.y, z: newZ });
+                                if (onSelectItem) onSelectItem(updated);
                               }
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs"
+                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >-</button>
                           <button
                             type="button"
@@ -1512,17 +2152,64 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               if (onManualMoveItem) {
                                 const step = gridSnapMm || 50;
                                 const newZ = Math.min(container.height - target.height, target.z + step);
+                                const updated = { ...target, z: newZ };
+                                activeSelectedItemRef.current = updated;
                                 onManualMoveItem(target.id, { x: target.x, y: target.y, z: newZ });
+                                if (onSelectItem) onSelectItem(updated);
                               }
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs"
+                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >+</button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Action buttons: Rotate & Remove */}
-                    <div className="flex items-center gap-1.5 pt-1">
+                    {/* Quick Gravity Drop button */}
+                    <button
+                      type="button"
+                      id="inspector-drop-btn"
+                      onClick={() => handleDropItemToSupport(target)}
+                      className="w-full py-1.5 px-2 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                      title={isJa ? '真下の床または荷物天面まで着地 (Space / D)' : 'Drop to floor or underlying cargo (Space / D)'}
+                    >
+                      <ArrowDownToLine className="w-3.5 h-3.5" />
+                      <span>{isJa ? '直下へ着地 (Space)' : 'Drop to Floor/Support (Space)'}</span>
+                    </button>
+
+                    {/* Keyboard Shortcuts Cheatsheet */}
+                    <div className="bg-amber-100/70 border border-amber-200/80 rounded px-2 py-1 text-[10px] text-amber-900 flex flex-col gap-0.5">
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-semibold text-slate-700">{isJa ? '↑ ↓ ← →' : 'Arrows'}:</span>
+                        <span>{isJa ? '水平微動 (前後左右)' : 'Planar Nudge'}</span>
+                      </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-semibold text-slate-700">{isJa ? 'Shift+↑/↓' : 'Shift+Up/Dn'}:</span>
+                        <span>{isJa ? '垂直昇降 (Z軸)' : 'Elevation Z'}</span>
+                      </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-semibold text-slate-700">{isJa ? 'Space / D' : 'Space / D'}:</span>
+                        <span>{isJa ? '直下へ着地' : 'Gravity Drop'}</span>
+                      </div>
+                    </div>
+
+                    {/* Action buttons: Move (reposition), Rotate & Remove */}
+                    <div className="flex items-center gap-1 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsDraggingExistingItem(target);
+                          setInternalSelectedItem(null);
+                          if (onSelectItem) onSelectItem(null);
+                          showToast(isJa
+                            ? `「${target.name}」の再配置モードを開始しました。移動先を3D画面内でクリックしてください (Escでキャンセル)`
+                            : `Moving "${target.name}". Click target position in 3D scene (Esc to cancel)`);
+                        }}
+                        className="flex-1 py-1 px-1 rounded bg-white hover:bg-amber-100 border border-amber-300 text-slate-800 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
+                        title={isJa ? '3D画面内でクリックして位置変更' : 'Click in 3D to reposition'}
+                      >
+                        <Move className="w-3 h-3 text-amber-700" />
+                        <span>{isJa ? '再配置' : 'Move'}</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
@@ -1539,7 +2226,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                             showToast(isJa ? `90°回転しました` : `Rotated 90°`);
                           }
                         }}
-                        className="flex-1 py-1 rounded bg-white hover:bg-amber-100 border border-amber-300 text-slate-800 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors"
+                        className="flex-1 py-1 px-1 rounded bg-white hover:bg-amber-100 border border-amber-300 text-slate-800 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
                       >
                         <RotateCw className="w-3 h-3 text-amber-700" />
                         <span>{isJa ? '回転' : 'Rotate'}</span>
@@ -1554,7 +2241,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                             showToast(isJa ? `未積載に戻しました` : `Returned to unplaced`);
                           }
                         }}
-                        className="flex-1 py-1 rounded bg-white hover:bg-red-50 border border-red-200 text-red-700 text-[11px] font-bold flex items-center justify-center gap-1 transition-colors"
+                        className="flex-1 py-1 px-1 rounded bg-white hover:bg-red-50 border border-red-200 text-red-700 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
                       >
                         <Trash2 className="w-3 h-3 text-red-600" />
                         <span>{isJa ? '未積載へ' : 'Remove'}</span>
@@ -1566,7 +2253,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             );
           })()}
 
-          {(activeSelectedItem || hoveredItem)?.fragile && (
+          {activeSelectedItem.fragile && (
             <div className="mt-2.5 flex items-center gap-1 bg-slate-100 border border-slate-300 text-slate-800 px-2 py-1 rounded text-[10px] font-semibold">
               <ShieldAlert className="w-3 h-3 text-slate-900 shrink-0" />
               <span>{isJa ? '天地無用 / 割れ物 (上に積載不可)' : 'Fragile / Do Not Stack On Top'}</span>
@@ -1584,22 +2271,22 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               ? { top: `${panelPos.y}px`, left: `${panelPos.x}px`, right: 'auto' }
               : undefined
           }
-          className={`absolute pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs space-y-3.5 z-20 w-72 text-slate-700 animate-fade-in transition-shadow ${
-            !panelPos ? 'top-16 right-3' : ''
+          className={`absolute pointer-events-auto bg-white/95 backdrop-blur-md p-2.5 rounded-xl border border-slate-200/90 shadow-lg text-xs space-y-2.5 z-20 w-64 text-slate-700 animate-fade-in transition-shadow ${
+            !panelPos ? 'top-14 right-3' : ''
           } ${isDragging ? 'shadow-2xl ring-2 ring-slate-900/30 select-none opacity-95' : ''}`}
         >
           {/* Header with Title, Drag Handle & Close Button */}
           <div 
             onMouseDown={handlePanelDragStart}
             onTouchStart={handlePanelDragStart}
-            className="flex items-center justify-between border-b border-slate-100 pb-2 cursor-grab active:cursor-grabbing select-none group"
+            className="flex items-center justify-between pb-1.5 border-b border-slate-100 cursor-grab active:cursor-grabbing select-none group"
             title={isJa ? 'ドラッグして画面内の好きな位置へ移動できます' : 'Drag to reposition anywhere'}
           >
             <div className="flex items-center gap-1">
-              <GripVertical className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-700 transition-colors shrink-0" />
-              <span className="text-xs font-bold text-slate-900 flex items-center gap-1">
-                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-900" />
-                {isJa ? '操作・視点コントロール' : 'Controls & Views'}
+              <GripVertical className="w-3 h-3 text-slate-400 group-hover:text-slate-600 transition-colors shrink-0" />
+              <span className="text-[11px] font-bold text-slate-900 flex items-center gap-1">
+                <SlidersHorizontal className="w-3 h-3 text-slate-700" />
+                {isJa ? '操作・視点' : 'Controls & Views'}
               </span>
             </div>
             <div className="flex items-center gap-1">
@@ -1610,8 +2297,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     e.stopPropagation();
                     setPanelPos(null);
                   }}
-                  title={isJa ? '小窓の位置を初期位置（右上）に戻す' : 'Reset panel position to top-right'}
-                  className="text-[10px] text-slate-500 hover:text-slate-800 font-semibold px-1 py-0.5 rounded hover:bg-slate-100 transition-colors"
+                  title={isJa ? '小窓の位置を初期位置に戻す' : 'Reset position'}
+                  className="text-[9px] text-slate-500 hover:text-slate-800 font-semibold px-1 py-0.5 rounded hover:bg-slate-100 transition-colors"
                 >
                   {isJa ? '位置初期化' : 'Reset Pos'}
                 </button>
@@ -1625,7 +2312,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     setXSlicePercent(100);
                   }}
                   title={isJa ? '断面を全表示に戻す (100%)' : 'Reset Slices (100%)'}
-                  className="text-[10px] text-slate-800 hover:text-black font-semibold px-1 hover:underline"
+                  className="text-[9px] text-slate-700 hover:text-black font-semibold px-1 hover:underline"
                 >
                   {isJa ? '全表示' : 'Reset'}
                 </button>
@@ -1636,7 +2323,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   e.stopPropagation();
                   setShowSliceControls(false);
                 }}
-                title={isJa ? 'コントロールUIを非表示にする' : 'Hide Controls'}
+                title={isJa ? '閉じる' : 'Close'}
                 className="text-slate-400 hover:text-slate-700 p-0.5 rounded hover:bg-slate-100 transition-colors"
               >
                 <X className="w-3.5 h-3.5" />
@@ -1645,88 +2332,223 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           </div>
 
           {/* 1. Camera View Presets (3D, TOP, SIDE, DOOR) */}
-          <div className="space-y-1.5">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold flex items-center gap-1">
-              <Compass className="w-3 h-3 text-slate-500" />
-              {isJa ? 'カメラ視点切替' : 'Camera Views'}
-            </span>
-            <div className="grid grid-cols-4 gap-1 text-xs">
+          <div>
+            <div className="grid grid-cols-4 p-0.5 bg-slate-100 rounded-lg text-[11px]">
               <button
                 id="camera-view-iso-btn"
                 onClick={() => setCameraView('iso')}
                 title={isJa ? '斜視図 (3D Isometric)' : '3D Isometric'}
-                className={`py-1.5 px-1 rounded-md transition-all flex items-center justify-center gap-1 font-bold text-center ${
+                className={`py-1 rounded-md transition-all font-semibold text-center ${
                   activeCameraView === 'iso'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <span>3D</span>
+                3D
               </button>
               <button
                 id="camera-view-top-btn"
                 onClick={() => setCameraView('top')}
                 title={isJa ? '上面図 (Top Plan)' : 'Top Plan'}
-                className={`py-1.5 px-1 rounded-md transition-all font-bold text-center ${
+                className={`py-1 rounded-md transition-all font-semibold text-center ${
                   activeCameraView === 'top'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <span>{isJa ? '天面' : 'TOP'}</span>
+                {isJa ? '天面' : 'TOP'}
               </button>
               <button
                 id="camera-view-side-btn"
                 onClick={() => setCameraView('side')}
                 title={isJa ? '側面図 (Side View)' : 'Side View'}
-                className={`py-1.5 px-1 rounded-md transition-all font-bold text-center ${
+                className={`py-1 rounded-md transition-all font-semibold text-center ${
                   activeCameraView === 'side'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <span>{isJa ? '側面' : 'SIDE'}</span>
+                {isJa ? '側面' : 'SIDE'}
               </button>
               <button
                 id="camera-view-door-btn"
                 onClick={() => setCameraView('door')}
                 title={isJa ? '扉側 (Door Entrance)' : 'Door'}
-                className={`py-1.5 px-1 rounded-md transition-all font-bold text-center ${
+                className={`py-1 rounded-md transition-all font-semibold text-center ${
                   activeCameraView === 'door'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                    ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <span>{isJa ? '扉側' : 'DOOR'}</span>
+                {isJa ? '扉側' : 'DOOR'}
               </button>
             </div>
           </div>
 
-          {/* 2. Visual & Display Style Controls (Vivid & Translucent) */}
-          <div className="bg-slate-50/90 border border-slate-200 p-2.5 rounded-lg space-y-2.5">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-pink-500" />
-              {isJa ? '表示・カラー設定' : 'Display & Visuals'}
-            </span>
+          {/* 2. Play Load / Loading Simulation Player */}
+          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="font-semibold text-slate-700 flex items-center gap-1">
+                <Play className="w-2.5 h-2.5 text-slate-800 fill-slate-800" />
+                {isJa ? '積載順' : 'Sequence'}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[10px] text-slate-600 font-semibold">
+                  {currentStep}/{activeItemsToDisplay.length}
+                </span>
+                <div className="flex items-center bg-slate-100 rounded px-1 py-0.5 text-[9px] font-semibold text-slate-600">
+                  {[1, 2, 4].map((speed) => (
+                    <button
+                      key={speed}
+                      onClick={() => setPlaybackSpeed(speed)}
+                      className={`px-1 rounded transition-colors ${
+                        playbackSpeed === speed 
+                          ? 'bg-white text-slate-900 font-bold shadow-2xs' 
+                          : 'hover:text-slate-900'
+                      }`}
+                    >
+                      {speed}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
-            {/* Quick Toggle Buttons Grid for Vivid and Translucent */}
-            <div className="grid grid-cols-2 gap-1.5">
+            {/* Play, Step Buttons & Slider */}
+            <div className="flex items-center gap-1">
+              <button
+                id="seq-reset-btn"
+                onClick={() => {
+                  setIsPlaying(false);
+                  setCurrentStep(0);
+                }}
+                disabled={currentStep === 0}
+                title={isJa ? '最初に戻る' : 'Reset to Start'}
+                className="p-1 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-30 transition-colors shrink-0"
+              >
+                <RotateCcw className="w-3 h-3" />
+              </button>
+              <button
+                id="seq-prev-btn"
+                onClick={() => {
+                  setIsPlaying(false);
+                  setCurrentStep(prev => Math.max(0, prev - 1));
+                }}
+                disabled={currentStep === 0}
+                title={isJa ? '前の荷物' : 'Previous Step'}
+                className="p-1 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-30 transition-colors shrink-0"
+              >
+                <SkipBack className="w-3 h-3" />
+              </button>
+              <button
+                id="seq-play-pause-btn"
+                onClick={() => {
+                  if (currentStep >= activeItemsToDisplay.length) {
+                    setCurrentStep(0);
+                  }
+                  setIsPlaying(!isPlaying);
+                }}
+                className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-semibold flex items-center gap-1 shadow-2xs transition-all active:scale-95 text-[10px] shrink-0"
+              >
+                {isPlaying ? (
+                  <>
+                    <Pause className="w-2.5 h-2.5 text-white" />
+                    <span>{isJa ? '停止' : 'Pause'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-2.5 h-2.5 fill-current text-white" />
+                    <span>{isJa ? '再生' : 'Play'}</span>
+                  </>
+                )}
+              </button>
+              <button
+                id="seq-next-btn"
+                onClick={() => {
+                  setIsPlaying(false);
+                  setCurrentStep(prev => Math.min(activeItemsToDisplay.length, prev + 1));
+                }}
+                disabled={currentStep >= activeItemsToDisplay.length}
+                title={isJa ? '次の荷物' : 'Next Step'}
+                className="p-1 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-30 transition-colors shrink-0"
+              >
+                <SkipForward className="w-3 h-3" />
+              </button>
+              <input
+                id="loading-step-slider"
+                type="range"
+                min="0"
+                max={activeItemsToDisplay.length}
+                value={currentStep}
+                onChange={(e) => {
+                  setIsPlaying(false);
+                  setCurrentStep(Number(e.target.value));
+                }}
+                className="w-full h-1 bg-slate-200 rounded appearance-none cursor-pointer accent-slate-900"
+              />
+            </div>
+          </div>
+
+          {/* 3. Slicing Sliders */}
+          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+            <div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 mb-0.5">
+                <span className="flex items-center gap-1 font-medium">
+                  <Layers className="w-2.5 h-2.5 text-slate-600" />
+                  {isJa ? '高さ (Z)' : 'Height (Z)'}
+                </span>
+                <span className="font-mono text-slate-700 font-semibold text-[10px]">{zSlicePercent}%</span>
+              </div>
+              <input
+                id="z-slice-slider"
+                type="range"
+                min="10"
+                max="100"
+                value={zSlicePercent}
+                onChange={(e) => setZSlicePercent(Number(e.target.value))}
+                className="w-full h-1 bg-slate-200 rounded appearance-none cursor-pointer accent-slate-900"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-[10px] text-slate-500 mb-0.5">
+                <span className="flex items-center gap-1 font-medium">
+                  <SlidersHorizontal className="w-2.5 h-2.5 text-slate-600" />
+                  {isJa ? '奥行 (X)' : 'Depth (X)'}
+                </span>
+                <span className="font-mono text-slate-700 font-semibold text-[10px]">{xSlicePercent}%</span>
+              </div>
+              <input
+                id="x-slice-slider"
+                type="range"
+                min="10"
+                max="100"
+                value={xSlicePercent}
+                onChange={(e) => setXSlicePercent(Number(e.target.value))}
+                className="w-full h-1 bg-slate-200 rounded appearance-none cursor-pointer accent-slate-900"
+              />
+            </div>
+          </div>
+
+          {/* 4. Visual & Display Style Controls (Vivid & Translucent) */}
+          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+            <div className="grid grid-cols-2 gap-1 text-[10px]">
               {/* Vivid Toggle Button */}
               <button
                 type="button"
                 id="panel-vivid-boost-toggle"
                 onClick={() => setIsVividBoost(!isVividBoost)}
-                className={`py-1.5 px-2 rounded-md font-bold text-xs flex items-center justify-between gap-1.5 transition-all border ${
+                className={`py-1 px-1.5 rounded-md font-semibold flex items-center justify-between transition-colors border ${
                   isVividBoost
-                    ? 'bg-pink-600 text-white border-pink-700 shadow-2xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    ? 'bg-pink-600 text-white border-pink-600'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 <span className="flex items-center gap-1">
-                  <Sparkles className={`w-3.5 h-3.5 ${isVividBoost ? 'text-yellow-300' : 'text-pink-500'}`} />
+                  <Sparkles className="w-3 h-3" />
                   <span>{isJa ? '鮮やか' : 'Vivid'}</span>
                 </span>
-                <span className={`text-[10px] px-1 py-0.2 rounded font-mono font-bold ${isVividBoost ? 'bg-pink-700 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                <span className="font-mono text-[9px] font-bold">
                   {isVividBoost ? 'ON' : 'OFF'}
                 </span>
               </button>
@@ -1741,32 +2563,26 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   }
                   setIsTranslucent(!isTranslucent);
                 }}
-                className={`py-1.5 px-2 rounded-md font-bold text-xs flex items-center justify-between gap-1.5 transition-all border ${
+                className={`py-1 px-1.5 rounded-md font-semibold flex items-center justify-between transition-colors border ${
                   isTranslucent
-                    ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                 }`}
               >
                 <span className="flex items-center gap-1">
-                  <Blend className="w-3.5 h-3.5" />
+                  <Blend className="w-3 h-3" />
                   <span>{isJa ? '半透明' : 'Translucent'}</span>
                 </span>
-                <span className={`text-[10px] px-1 py-0.2 rounded font-mono font-bold ${isTranslucent ? 'bg-indigo-700 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                <span className="font-mono text-[9px] font-bold">
                   {isTranslucent ? `${cargoOpacity}%` : 'OFF'}
                 </span>
               </button>
             </div>
 
-            {/* If Translucent is ON, show opacity slider & presets */}
+            {/* If Translucent is ON, show compact opacity slider */}
             {isTranslucent && (
-              <div className="space-y-1.5 pt-1.5 border-t border-slate-200/80">
-                <div className="flex items-center justify-between text-[11px] text-slate-600">
-                  <span className="font-medium flex items-center gap-1">
-                    <Blend className="w-3 h-3 text-indigo-600" />
-                    {isJa ? '不透明度' : 'Opacity'}:
-                  </span>
-                  <span className="font-mono font-bold text-indigo-700">{cargoOpacity}%</span>
-                </div>
+              <div className="flex items-center gap-1.5 pt-0.5">
+                <span className="text-[9px] text-slate-500 shrink-0 font-medium">{isJa ? '透明度' : 'Opacity'}</span>
                 <input
                   id="cargo-opacity-slider"
                   type="range"
@@ -1775,240 +2591,65 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   step="5"
                   value={cargoOpacity}
                   onChange={(e) => setCargoOpacity(Number(e.target.value))}
-                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  className="w-full h-1 bg-slate-200 rounded appearance-none cursor-pointer accent-indigo-600"
                 />
-                <div className="grid grid-cols-4 gap-1 pt-0.5">
-                  {[30, 50, 65, 85].map((val) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setCargoOpacity(val)}
-                      className={`py-0.5 rounded text-[10px] font-medium border text-center transition-colors ${
-                        cargoOpacity === val
-                          ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {val}%
-                    </button>
-                  ))}
-                </div>
+                <span className="font-mono text-[9px] font-semibold text-indigo-700 shrink-0 w-6 text-right">{cargoOpacity}%</span>
               </div>
             )}
 
             {/* Color Scheme selector */}
-            <div className="pt-1.5 border-t border-slate-200/80 space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-slate-500 font-medium">
-                  {isJa ? '配色モード:' : 'Color Scheme:'}
-                </span>
-                <span className="text-[10px] text-slate-600 font-medium">
-                  {colorMode === 'vivid' ? (isJa ? '✨ 鮮やかネオン' : '✨ Vivid Neon') : ''}
-                </span>
-              </div>
-              <div className="grid grid-cols-4 gap-1 text-[10px]">
-                <button
-                  id="color-mode-cargo-btn"
-                  onClick={() => setColorMode('cargo')}
-                  className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                    colorMode === 'cargo' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {isJa ? '種別' : 'Cargo'}
-                </button>
-                <button
-                  id="color-mode-vivid-btn"
-                  onClick={() => setColorMode('vivid')}
-                  title={isJa ? '超鮮やかなネオンカラーで表示' : 'Show with vivid neon colors'}
-                  className={`py-1 rounded-md text-center transition-colors font-bold ${
-                    colorMode === 'vivid' ? 'bg-pink-600 text-white shadow-xs' : 'bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200'
-                  }`}
-                >
-                  {isJa ? '✨鮮やか' : '✨Vivid'}
-                </button>
-                <button
-                  id="color-mode-weight-btn"
-                  onClick={() => setColorMode('weight')}
-                  className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                    colorMode === 'weight' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {isJa ? '重量' : 'Weight'}
-                </button>
-                <button
-                  id="color-mode-seq-btn"
-                  onClick={() => setColorMode('sequence')}
-                  className={`py-1 rounded-md text-center transition-colors font-semibold ${
-                    colorMode === 'sequence' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {isJa ? '順序' : 'Seq'}
-                </button>
-              </div>
-
-              {onApplyVividColors && (
-                <button
-                  type="button"
-                  id="panel-apply-vivid-colors-btn"
-                  onClick={() => onApplyVividColors('vivid_neon')}
-                  className="w-full mt-1 py-1.5 px-2 rounded-lg bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-500 hover:from-pink-600 hover:via-purple-600 hover:to-cyan-600 text-white font-bold text-[10px] flex items-center justify-center gap-1.5 shadow-2xs transition-all active:scale-95"
-                  title={isJa ? '貨物マニフェスト自体に鮮やかネオンカラーを一括保存' : 'Apply vivid colors directly to manifest items'}
-                >
-                  <Palette className="w-3 h-3" />
-                  <span>{isJa ? '全貨物の色を鮮やかに変更' : 'Apply Vivid Colors to Cargo'}</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 3. Play Load / Loading Simulation Player */}
-          <div className="bg-white border border-slate-300 p-2.5 rounded-lg space-y-2 shadow-2xs">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold flex items-center gap-1.5 text-slate-900">
-                <Play className="w-3.5 h-3.5 text-slate-900 fill-slate-900" />
-                {isJa ? '積載シミュレーション' : 'Loading Sequence'}
-              </span>
-              <span className="font-mono text-[11px] text-slate-900 font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
-                {currentStep} / {activeItemsToDisplay.length}
-              </span>
+            <div className="grid grid-cols-4 p-0.5 bg-slate-100 rounded-md text-[9px]">
+              <button
+                id="color-mode-cargo-btn"
+                onClick={() => setColorMode('cargo')}
+                className={`py-0.5 rounded text-center transition-colors font-medium ${
+                  colorMode === 'cargo' ? 'bg-white text-slate-900 font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {isJa ? '種別' : 'Cargo'}
+              </button>
+              <button
+                id="color-mode-vivid-btn"
+                onClick={() => setColorMode('vivid')}
+                title={isJa ? '鮮やかカラー' : 'Vivid Colors'}
+                className={`py-0.5 rounded text-center transition-colors font-semibold ${
+                  colorMode === 'vivid' ? 'bg-pink-600 text-white font-bold shadow-2xs' : 'text-pink-700 hover:text-pink-900'
+                }`}
+              >
+                {isJa ? '鮮やか' : 'Vivid'}
+              </button>
+              <button
+                id="color-mode-weight-btn"
+                onClick={() => setColorMode('weight')}
+                className={`py-0.5 rounded text-center transition-colors font-medium ${
+                  colorMode === 'weight' ? 'bg-white text-slate-900 font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {isJa ? '重量' : 'Weight'}
+              </button>
+              <button
+                id="color-mode-seq-btn"
+                onClick={() => setColorMode('sequence')}
+                className={`py-0.5 rounded text-center transition-colors font-medium ${
+                  colorMode === 'sequence' ? 'bg-white text-slate-900 font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {isJa ? '順序' : 'Seq'}
+              </button>
             </div>
 
-            {/* Play, Step, Speed Buttons */}
-            <div className="flex items-center justify-between gap-1.5">
-              <div className="flex items-center gap-1">
-                <button
-                  id="seq-reset-btn"
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setCurrentStep(0);
-                  }}
-                  title={isJa ? '最初に戻る' : 'Reset to Start'}
-                  className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-200 transition-colors"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  id="seq-prev-btn"
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setCurrentStep(prev => Math.max(0, prev - 1));
-                  }}
-                  disabled={currentStep === 0}
-                  title={isJa ? '前の荷物' : 'Previous Step'}
-                  className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 hover:text-slate-900 border border-slate-200 transition-colors"
-                >
-                  <SkipBack className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  id="seq-play-pause-btn"
-                  onClick={() => {
-                    if (currentStep >= activeItemsToDisplay.length) {
-                      setCurrentStep(0);
-                    }
-                    setIsPlaying(!isPlaying);
-                  }}
-                  className="px-2.5 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs"
-                >
-                  {isPlaying ? (
-                    <>
-                      <Pause className="w-3.5 h-3.5 text-white" />
-                      <span>{isJa ? '停止' : 'Pause'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5 fill-current text-white" />
-                      <span>{isJa ? '再生' : 'Play'}</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  id="seq-next-btn"
-                  onClick={() => {
-                    setIsPlaying(false);
-                    setCurrentStep(prev => Math.min(activeItemsToDisplay.length, prev + 1));
-                  }}
-                  disabled={currentStep >= activeItemsToDisplay.length}
-                  title={isJa ? '次の荷物' : 'Next Step'}
-                  className="p-1.5 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 hover:text-slate-900 border border-slate-200 transition-colors"
-                >
-                  <SkipForward className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* Speed Buttons */}
-              <div className="flex items-center bg-slate-100 border border-slate-200 rounded p-0.5 text-[10px] font-semibold text-slate-600">
-                {[1, 2, 4].map((speed) => (
-                  <button
-                    key={speed}
-                    onClick={() => setPlaybackSpeed(speed)}
-                    className={`px-1.5 py-0.5 rounded transition-colors ${
-                      playbackSpeed === speed 
-                        ? 'bg-slate-900 text-white font-bold shadow-xs' 
-                        : 'hover:text-slate-900'
-                    }`}
-                  >
-                    {speed}x
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Step Slider */}
-            <div>
-              <input
-                id="loading-step-slider"
-                type="range"
-                min="0"
-                max={activeItemsToDisplay.length}
-                value={currentStep}
-                onChange={(e) => {
-                  setIsPlaying(false);
-                  setCurrentStep(Number(e.target.value));
-                }}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
-              />
-            </div>
-          </div>
-
-          {/* 4. Slicing Sliders */}
-          <div className="space-y-2.5">
-            <div>
-              <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-                <span className="flex items-center gap-1 font-medium">
-                  <Layers className="w-3 h-3 text-slate-700" />
-                  {isJa ? '高さ断面 (Z)' : 'Height Slice (Z)'}
-                </span>
-                <span className="font-mono text-slate-800 font-bold">{zSlicePercent}%</span>
-              </div>
-              <input
-                id="z-slice-slider"
-                type="range"
-                min="10"
-                max="100"
-                value={zSlicePercent}
-                onChange={(e) => setZSlicePercent(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-                <span className="flex items-center gap-1 font-medium">
-                  <SlidersHorizontal className="w-3 h-3 text-slate-700" />
-                  {isJa ? '奥行断面 (X)' : 'Depth Slice (X)'}
-                </span>
-                <span className="font-mono text-slate-800 font-bold">{xSlicePercent}%</span>
-              </div>
-              <input
-                id="x-slice-slider"
-                type="range"
-                min="10"
-                max="100"
-                value={xSlicePercent}
-                onChange={(e) => setXSlicePercent(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900"
-              />
-            </div>
+            {onApplyVividColors && (
+              <button
+                type="button"
+                id="panel-apply-vivid-colors-btn"
+                onClick={() => onApplyVividColors('vivid_neon')}
+                className="w-full py-1 rounded bg-slate-50 hover:bg-pink-50 border border-slate-200 hover:border-pink-200 text-pink-700 text-[9px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                title={isJa ? '貨物マニフェスト自体に鮮やかネオンカラーを一括保存' : 'Apply vivid colors directly to manifest items'}
+              >
+                <Palette className="w-2.5 h-2.5" />
+                <span>{isJa ? '全貨物の色を鮮やかに変更' : 'Apply Vivid Colors to Cargo'}</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -2047,6 +2688,28 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   {isJa ? '配置キャンセル' : 'Cancel Placement'}
                 </button>
               )}
+              {onManualUnloadContainer && (
+                <button
+                  type="button"
+                  id="tray-unload-container-btn"
+                  onClick={handleUnloadContainerAll}
+                  title={isJa 
+                    ? 'コンテナ内の貨物をすべてアンロードして手動で載せる (Ctrl+Zで復元可能)' 
+                    : 'Unload all container cargo to tray for manual loading (Ctrl+Z to undo)'}
+                  className={`px-2 py-1 rounded text-[11px] font-bold border transition-all flex items-center gap-1 cursor-pointer ${
+                    confirmingUnload
+                      ? 'bg-red-600 text-white border-red-700 animate-pulse'
+                      : 'bg-white hover:bg-red-50 text-red-700 border-red-200'
+                  }`}
+                >
+                  <PackageMinus className="w-3.5 h-3.5 text-current" />
+                  <span>
+                    {confirmingUnload
+                      ? (isJa ? '本当に空にする？(確定)' : 'Confirm Unload?')
+                      : (isJa ? '一括アンロード' : 'Unload All')}
+                  </span>
+                </button>
+              )}
               <button
                 type="button"
                 id="toggle-tray-collapse-btn"
@@ -2063,13 +2726,34 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           {!isTrayCollapsed && (
             <div className="p-2.5 overflow-x-auto flex items-center gap-2.5 max-h-36 scrollbar-thin">
               {unplacedItems.length === 0 ? (
-                <div className="py-3 px-4 text-slate-500 text-xs flex items-center gap-2 w-full justify-center">
-                  <Check className="w-4 h-4 text-emerald-500" />
-                  <span>
-                    {isJa 
-                      ? 'すべての貨物がコンテナ内に配置済みです。3Dビュー内の荷物をクリックして位置調整や90°回転が行えます。' 
-                      : 'All items are currently loaded. You can click items inside the 3D container to reposition or rotate them.'}
-                  </span>
+                <div className="py-3 px-4 text-slate-600 text-xs flex flex-wrap items-center justify-between gap-3 w-full bg-slate-50/80 rounded-lg border border-dashed border-slate-300">
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span>
+                      {isJa 
+                        ? 'すべての貨物がコンテナ内に配置済みです。手動でゼロから載せ直す場合は一括アンロードを実行できます。' 
+                        : 'All items are currently loaded. To manually pack from scratch, unload all items to tray.'}
+                    </span>
+                  </div>
+                  {onManualUnloadContainer && (
+                    <button
+                      type="button"
+                      id="tray-empty-state-unload-btn"
+                      onClick={handleUnloadContainerAll}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer ${
+                        confirmingUnload
+                          ? 'bg-red-600 text-white animate-pulse'
+                          : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-300'
+                      }`}
+                    >
+                      <PackageMinus className="w-3.5 h-3.5 text-current" />
+                      <span>
+                        {confirmingUnload
+                          ? (isJa ? '本当に空にしますか？ (クリックで確定)' : 'Confirm Unload All Cargo?')
+                          : (isJa ? 'コンテナを空にして手動で載せる (一括アンロード)' : 'Unload Container & Pack Manually')}
+                      </span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 unplacedItems.map((item, idx) => {

@@ -1,19 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { CargoItem, Container, UnitSystem, Language } from '../types';
 import { SAMPLE_CARGO_PRESETS, CargoPreset, SAMPLE_CSV_TEMPLATE } from '../data/presets';
 import { 
   Plus, Trash2, Upload, Download, Sparkles, 
   ShieldAlert, Check, FileSpreadsheet, FileDown,
   Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers, ArrowDownToLine,
-  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, Palette, ChevronDown, Undo2
+  AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, ChevronDown
 } from 'lucide-react';
 import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
-import { 
-  VIVID_NEON_PALETTE, 
-  COLOR_PALETTE_THEMES, 
-  applyVividColorsToCargoList, 
-  ColorPaletteId 
-} from '../utils/colors';
+import { VIVID_NEON_PALETTE } from '../utils/colors';
 
 interface CargoManagerProps {
   cargoList: CargoItem[];
@@ -22,6 +18,7 @@ interface CargoManagerProps {
   unitSystem: UnitSystem;
   language: Language;
   onSelectContainer?: (containerId: string) => void;
+  onOpenImportManifest?: () => void;
 }
 
 const COLOR_PALETTE = VIVID_NEON_PALETTE;
@@ -32,46 +29,30 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   container,
   unitSystem,
   language,
-  onSelectContainer
+  onSelectContainer,
+  onOpenImportManifest
 }) => {
   const [isAddingNew, setIsAddingNew] = useState<boolean>(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [importNotification, setImportNotification] = useState<string | null>(null);
+  const [showTemplateDropdown, setShowTemplateDropdown] = useState<boolean>(false);
+  const [showExportDropdown, setShowExportDropdown] = useState<boolean>(false);
 
-  // Vivid colors palette state & handlers
-  const [previousColors, setPreviousColors] = useState<{ id: string; color: string }[] | null>(null);
-  const [showColorMenu, setShowColorMenu] = useState<boolean>(false);
-  const [activeThemeId, setActiveThemeId] = useState<ColorPaletteId>('vivid_neon');
-
-  const handleApplyPalette = (paletteId: ColorPaletteId) => {
-    setPreviousColors(cargoList.map(c => ({ id: c.id, color: c.color })));
-    setActiveThemeId(paletteId);
-    const updated = applyVividColorsToCargoList(cargoList, paletteId);
-    onChangeCargoList(updated);
-    setShowColorMenu(false);
-    const theme = COLOR_PALETTE_THEMES.find(t => t.id === paletteId);
-    setImportNotification(
-      isJa
-        ? `✨ ${theme?.nameJa || '鮮やかカラー'} を全貨物に適用しました！`
-        : `✨ Applied ${theme?.nameEn || 'vivid colors'} to all cargo items!`
-    );
-    setTimeout(() => setImportNotification(null), 3500);
-  };
-
-  const handleRevertColors = () => {
-    if (!previousColors) return;
-    const colorMap = new Map(previousColors.map(p => [p.id, p.color]));
-    const reverted = cargoList.map(c => ({
-      ...c,
-      color: colorMap.get(c.id) || c.color,
-    }));
-    onChangeCargoList(reverted);
-    setPreviousColors(null);
-    setShowColorMenu(false);
-    setImportNotification(isJa ? '↩️ カラーを直前の状態に戻しました' : '↩️ Reverted to previous colors');
-    setTimeout(() => setImportNotification(null), 3000);
-  };
+  // Close dropdowns on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('#download-template-btn') && !target.closest('#template-dropdown-menu')) {
+        setShowTemplateDropdown(false);
+      }
+      if (!target.closest('#export-cargo-btn') && !target.closest('#export-dropdown-menu')) {
+        setShowExportDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Sorting and search controls state for Cargo manifest
   const [sortField, setSortField] = useState<'none' | 'name' | 'weight' | 'quantity'>('none');
@@ -261,8 +242,35 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  // Export Excel (.xlsx)
+  const handleExportExcel = () => {
+    if (cargoList.length === 0) return;
+    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)', '床置き(1/0)', '積載対象(1/0)'];
+    const rows = cargoList.map(c => [
+      c.name,
+      c.width,
+      c.height,
+      c.length,
+      c.weight,
+      c.quantity,
+      c.allowYaw !== false ? 1 : 0,
+      c.color,
+      c.fragile ? 1 : 0,
+      c.floorPlacement ? 1 : 0,
+      c.enabled !== false ? 1 : 0
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!cols'] = [
+      { wch: 24 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 8 }, { wch: 15 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '貨物一覧');
+    XLSX.writeFile(wb, `cargo_manifest_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   // Download Sample CSV Template
-  const handleDownloadTemplate = () => {
+  const handleDownloadCsvTemplate = () => {
     const blob = new Blob(['\uFEFF' + SAMPLE_CSV_TEMPLATE], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -274,122 +282,243 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Import CSV - Smart detection for both the 10-column & 11-column format
-  const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Download Sample Excel Template (.xlsx)
+  const handleDownloadExcelTemplate = () => {
+    const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)', '床置き(1/0)', '積載対象(1/0)'];
+    const sampleRows = [
+      ['CMB-M108V-KB1', 1100, 1230, 700, 125, 1, 1, '#ef4444', 0, 0, 0],
+      ['PURY-P350YNW-A2', 1270, 1920, 760, 292, 5, 1, '#f97316', 1, 1, 0],
+      ['PURY-M200YNW-A1', 950, 1920, 760, 244, 2, 1, '#ec4899', 1, 1, 0],
+      ['CMB-M104V-J1', 1070, 380, 700, 32, 2, 1, '#3b82f6', 0, 0, 0],
+      ['CMB-M104V-KB1', 1100, 1230, 700, 101, 1, 1, '#14b8a6', 0, 0, 0],
+      ['CMB-M106V-J1', 1070, 380, 700, 35, 5, 1, '#d97706', 0, 0, 0],
+      ['CMB-M108V-J1', 1070, 380, 700, 39, 5, 1, '#059669', 0, 0, 0],
+      ['CMB-M1012V-J1', 1380, 380, 840, 58, 10, 1, '#0284c7', 0, 0, 0]
+    ];
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
+    ws['!cols'] = [
+      { wch: 24 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 8 }, { wch: 15 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 12 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '貨物テンプレート');
+    XLSX.writeFile(wb, 'cargo_list_template.xlsx');
+  };
+
+  // Backward compatibility wrapper for template download
+  const handleDownloadTemplate = handleDownloadExcelTemplate;
+
+  // Unified parser for 2D array data (from either Excel or CSV)
+  const parseRowsToCargoItems = (rawRows: any[][], fileTypeLabel: string) => {
+    if (!rawRows || rawRows.length === 0) {
+      setImportNotification(isJa ? `${fileTypeLabel} の中にデータが見つかりませんでした。` : `No data found in ${fileTypeLabel}.`);
+      setTimeout(() => setImportNotification(null), 4000);
+      return;
+    }
+
+    // Filter out completely empty rows
+    const nonEmptyRows = rawRows.filter(row => Array.isArray(row) && row.some(cell => cell !== null && cell !== undefined && String(cell).trim() !== ''));
+    if (nonEmptyRows.length === 0) {
+      setImportNotification(isJa ? `${fileTypeLabel} の中に有効なデータ行がありませんでした。` : `No valid rows in ${fileTypeLabel}.`);
+      setTimeout(() => setImportNotification(null), 4000);
+      return;
+    }
+
+    // Intelligent header row detection: scan top 10 rows for keywords
+    let headerRowIndex = 0;
+    let maxKeywordMatches = 0;
+    const headerRegex = /貨物名|品名|商品名|型番|SKU|Name|Model|Item|幅|Width|高さ|Height|奥行|奥行き|長さ|Depth|Length|重量|Weight|Kg|Wt|重さ|個数|数量|Quantity|Qty|MaxQty/i;
+
+    const scanLimit = Math.min(10, nonEmptyRows.length);
+    for (let r = 0; r < scanLimit; r++) {
+      const matchCount = nonEmptyRows[r].filter(cell => typeof cell === 'string' && headerRegex.test(cell)).length;
+      if (matchCount > maxKeywordMatches) {
+        maxKeywordMatches = matchCount;
+        headerRowIndex = r;
+      }
+    }
+
+    const headerParts = (nonEmptyRows[headerRowIndex] || []).map(s => String(s ?? '').trim().replace(/^"|"$/g, ''));
+
+    // Check column index mappings
+    let nameIdx = headerParts.findIndex(h => /貨物名|品名|商品名|型番|SKU|Name|Model|Item/i.test(h));
+    let widthIdx = headerParts.findIndex(h => /幅|Width|W(?![a-z])/i.test(h));
+    let heightIdx = headerParts.findIndex(h => /高さ|Height|H(?![a-z])/i.test(h));
+    let depthIdx = headerParts.findIndex(h => /奥行|奥行き|長さ|Depth|Length|L(?![a-z])|D(?![a-z])/i.test(h));
+    let weightIdx = headerParts.findIndex(h => /重量|Weight|Kg|Wt|重さ/i.test(h));
+    let qtyIdx = headerParts.findIndex(h => /個数|数量|最大個数|最大数量|Quantity|Qty|MaxQty|Count/i.test(h));
+    let minQtyIdx = headerParts.findIndex(h => /最小個数|最小数量|MinQty|Min/i.test(h));
+    let rotIdx = headerParts.findIndex(h => /横回転|3D回転|回転許可|回転|Rotate|Rotation|Yaw/i.test(h));
+    let colorIdx = headerParts.findIndex(h => /カラー|色|Color|Hex/i.test(h));
+    let fragileIdx = headerParts.findIndex(h => /割れ物|天地無用|壊れ物|壊れもの|Fragile/i.test(h));
+    let floorIdx = headerParts.findIndex(h => /床置き|床面|床|Floor|FloorPlacement|MustBeOnFloor/i.test(h));
+    let enabledIdx = headerParts.findIndex(h => /積載対象|積載|対象|Enabled|Active|Include|Select/i.test(h));
+
+    // Positional fallbacks if headers couldn't be matched
+    if (nameIdx === -1) nameIdx = 0;
+    if (widthIdx === -1) widthIdx = 1;
+    if (heightIdx === -1) heightIdx = 2;
+    if (depthIdx === -1) depthIdx = 3;
+    if (weightIdx === -1) weightIdx = 4;
+    
+    const isOld10Col = headerParts.length >= 10 || (minQtyIdx !== -1 && minQtyIdx !== qtyIdx);
+    if (qtyIdx === -1) {
+      qtyIdx = isOld10Col ? 6 : 5;
+    }
+    if (rotIdx === -1) rotIdx = isOld10Col ? 7 : 6;
+    if (colorIdx === -1) colorIdx = isOld10Col ? 8 : 7;
+    if (fragileIdx === -1) fragileIdx = isOld10Col ? 9 : 8;
+
+    const newItems: CargoItem[] = [];
+    const dataRows = nonEmptyRows.slice(headerRowIndex + 1);
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const parts = dataRows[i];
+      if (!parts || parts.length === 0) continue;
+
+      const rawName = parts[nameIdx];
+      const rawWidth = parts[widthIdx];
+      const rawHeight = parts[heightIdx];
+      const rawDepth = parts[depthIdx];
+      const rawWeight = parts[weightIdx];
+      const rawQty = parts[qtyIdx];
+
+      // If dimensions and name are all missing or empty, skip
+      if (!rawName && !rawWidth && !rawHeight && !rawDepth) continue;
+
+      const itemName = String(rawName || '').trim() || `Cargo-${i + 1}`;
+      const itemWidth = Math.max(50, Math.round(Number(rawWidth))) || 1000;
+      const itemHeight = Math.max(50, Math.round(Number(rawHeight))) || 1000;
+      const itemDepth = Math.max(50, Math.round(Number(rawDepth))) || 1000;
+      const itemWeight = Math.max(1, Math.round(Number(rawWeight))) || 50;
+      const itemQty = Math.max(1, Math.round(Number(rawQty) || (minQtyIdx !== -1 ? Number(parts[minQtyIdx]) : 1) || 1));
+
+      // Rotation flag
+      let allowRot = true;
+      if (rotIdx !== -1 && parts[rotIdx] !== undefined && parts[rotIdx] !== '') {
+        const rawRotStr = String(parts[rotIdx]).toLowerCase().trim();
+        allowRot = rawRotStr === '1' || rawRotStr === 'true' || rawRotStr === 'yes' || rawRotStr === 'ok' || rawRotStr === '可' || rawRotStr === '許可';
+      }
+
+      // Color
+      const rawColor = parts[colorIdx] !== undefined ? String(parts[colorIdx]).trim() : '';
+      const validHex = /^#[0-9A-Fa-f]{6}$/.test(rawColor) ? rawColor : COLOR_PALETTE[i % COLOR_PALETTE.length];
+
+      // Explicit Fragile Flag
+      let isFragile = false;
+      if (fragileIdx !== -1 && parts[fragileIdx] !== undefined && parts[fragileIdx] !== '') {
+        const rawFrag = String(parts[fragileIdx]).toLowerCase().trim();
+        isFragile = rawFrag === '1' || rawFrag === 'true' || rawFrag === 'yes' || rawFrag === '割れ物' || rawFrag === '天地無用';
+      } else {
+        isFragile = itemHeight > 1800;
+      }
+
+      // Explicit Floor Placement Check
+      let isFloorPlacement = false;
+      if (floorIdx !== -1 && parts[floorIdx] !== undefined && parts[floorIdx] !== '') {
+        const rawFloor = String(parts[floorIdx]).toLowerCase().trim();
+        isFloorPlacement = rawFloor === '1' || rawFloor === 'true' || rawFloor === 'yes' || rawFloor === '床置き' || rawFloor === '要';
+      }
+
+      // Explicit Enabled / Selected Flag Check - Default initial state is Deselect (enabled: false) per user request
+      let isEnabled = false;
+      if (enabledIdx !== -1 && parts[enabledIdx] !== undefined && parts[enabledIdx] !== '') {
+        const rawEn = String(parts[enabledIdx]).toLowerCase().trim();
+        isEnabled = rawEn === '1' || rawEn === 'true' || rawEn === 'yes' || rawEn === 'ok' || rawEn === '対象' || rawEn === '選択' || rawEn === 'select';
+      }
+
+      newItems.push({
+        id: `import_${Date.now()}_${i}`,
+        sku: itemName,
+        name: itemName,
+        width: itemWidth,
+        height: itemHeight,
+        length: itemDepth,
+        weight: itemWeight,
+        quantity: itemQty,
+        color: validHex,
+        allowTilt: false,
+        allowRoll: false,
+        allowYaw: allowRot,
+        maxStackWeight: isFragile ? 0 : (itemHeight > 1800 ? 0 : 150),
+        fragile: isFragile,
+        floorPlacement: isFloorPlacement,
+        priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3),
+        enabled: isEnabled
+      });
+    }
+
+    if (newItems.length > 0) {
+      onChangeCargoList(newItems);
+      const totalUnits = newItems.reduce((sum, item) => sum + item.quantity, 0);
+      setImportNotification(
+        isJa
+          ? `${fileTypeLabel} から ${newItems.length} 品目（合計 ${totalUnits.toLocaleString()} 個）を取り込みました（初期状態: 未選択）。`
+          : `Successfully imported ${newItems.length} items (${totalUnits.toLocaleString()} units) from ${fileTypeLabel} (initially deselected).`
+      );
+      setTimeout(() => setImportNotification(null), 4500);
+    } else {
+      setImportNotification(
+        isJa
+          ? `${fileTypeLabel} 内に有効な貨物データが見つかりませんでした。列構成をご確認ください。`
+          : `No valid cargo data rows found in ${fileTypeLabel}. Please check column structure.`
+      );
+      setTimeout(() => setImportNotification(null), 5000);
+    }
+  };
+
+  // Import Handler for both Excel (.xlsx, .xls) and CSV (.csv, .txt)
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      if (!text) return;
+    const fileName = file.name;
+    const lowerName = fileName.toLowerCase();
+    const isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
 
-      // Strip BOM and clean lines
-      const cleanText = text.replace(/^\uFEFF/, '');
-      const lines = cleanText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-      if (lines.length <= 1) return;
-
-      const headerParts = lines[0].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-
-      // Check column index mappings
-      let nameIdx = headerParts.findIndex(h => /貨物名|品名|商品名|型番|SKU|Name|Model/i.test(h));
-      let widthIdx = headerParts.findIndex(h => /幅|Width|W/i.test(h));
-      let heightIdx = headerParts.findIndex(h => /高さ|Height|H/i.test(h));
-      let depthIdx = headerParts.findIndex(h => /奥行|奥行き|長さ|Depth|Length|L|D/i.test(h));
-      let weightIdx = headerParts.findIndex(h => /重量|Weight|Kg|Wt/i.test(h));
-      let qtyIdx = headerParts.findIndex(h => /個数|数量|最大個数|最大数量|Quantity|Qty|MaxQty|Max/i.test(h));
-      let minQtyIdx = headerParts.findIndex(h => /最小個数|最小数量|MinQty|Min/i.test(h));
-      let rotIdx = headerParts.findIndex(h => /横回転|3D回転|回転許可|回転|Rotate|Rotation|Yaw/i.test(h));
-      let colorIdx = headerParts.findIndex(h => /カラー|色|Color|Hex/i.test(h));
-      let fragileIdx = headerParts.findIndex(h => /割れ物|天地無用|壊れ物|壊れもの|Fragile/i.test(h));
-      let floorIdx = headerParts.findIndex(h => /床置き|床面|床|Floor|FloorPlacement|MustBeOnFloor/i.test(h));
-      let enabledIdx = headerParts.findIndex(h => /積載対象|積載|対象|Enabled|Active|Include|Select/i.test(h));
-
-      // Positional fallbacks
-      if (nameIdx === -1) nameIdx = 0;
-      if (widthIdx === -1) widthIdx = 1;
-      if (heightIdx === -1) heightIdx = 2;
-      if (depthIdx === -1) depthIdx = 3;
-      if (weightIdx === -1) weightIdx = 4;
-      
-      const isOld10Col = headerParts.length >= 10 || (minQtyIdx !== -1 && minQtyIdx !== qtyIdx);
-      if (qtyIdx === -1) {
-        qtyIdx = isOld10Col ? 6 : 5;
-      }
-      if (rotIdx === -1) rotIdx = isOld10Col ? 7 : 6;
-      if (colorIdx === -1) colorIdx = isOld10Col ? 8 : 7;
-      if (fragileIdx === -1) fragileIdx = isOld10Col ? 9 : 8;
-
-      const newItems: CargoItem[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-        if (parts.length < 4) continue;
-
-        const itemName = parts[nameIdx] || `Cargo-${i}`;
-        const itemWidth = Number(parts[widthIdx]) || 1000;
-        const itemHeight = Number(parts[heightIdx]) || 1000;
-        const itemDepth = Number(parts[depthIdx]) || 1000;
-        const itemWeight = Number(parts[weightIdx]) || 50;
-        const itemQty = Number(parts[qtyIdx]) || (minQtyIdx !== -1 ? Number(parts[minQtyIdx]) : 1) || 1;
-        const rawRot = parts[rotIdx]?.toLowerCase();
-        const allowRot = rotIdx === -1 || rawRot === '1' || rawRot === 'true' || rawRot === 'yes' || rawRot === 'ok';
-        const rawColor = parts[colorIdx];
-        const validHex = /^#[0-9A-Fa-f]{6}$/.test(rawColor) ? rawColor : COLOR_PALETTE[(i - 1) % COLOR_PALETTE.length];
-
-        // Explicit Fragile Flag Check (1/0 or true/false)
-        let isFragile = false;
-        if (fragileIdx !== -1 && parts[fragileIdx] !== undefined && parts[fragileIdx] !== '') {
-          const rawFrag = parts[fragileIdx].toLowerCase().trim();
-          isFragile = rawFrag === '1' || rawFrag === 'true' || rawFrag === 'yes' || rawFrag === '割れ物' || rawFrag === '天地無用';
-        } else {
-          // Fallback heuristic if column is omitted
-          isFragile = itemHeight > 1800;
+    try {
+      if (isExcel) {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+          throw new Error(isJa ? 'Excelファイル内にシートが見つかりませんでした。' : 'No worksheets found in the Excel file.');
         }
-
-        // Explicit Floor Placement Check (1/0 or true/false)
-        let isFloorPlacement = false;
-        if (floorIdx !== -1 && parts[floorIdx] !== undefined && parts[floorIdx] !== '') {
-          const rawFloor = parts[floorIdx].toLowerCase().trim();
-          isFloorPlacement = rawFloor === '1' || rawFloor === 'true' || rawFloor === 'yes' || rawFloor === '床置き' || rawFloor === '要';
-        }
-
-        // Explicit Enabled / Selected Flag Check
-        let isEnabled = true;
-        if (enabledIdx !== -1 && parts[enabledIdx] !== undefined && parts[enabledIdx] !== '') {
-          const rawEn = parts[enabledIdx].toLowerCase().trim();
-          isEnabled = rawEn === '1' || rawEn === 'true' || rawEn === 'yes' || rawEn === 'ok' || rawEn === '対象';
-        }
-
-        newItems.push({
-          id: `csv_${Date.now()}_${i}`,
-          sku: itemName,
-          name: itemName,
-          width: itemWidth,
-          height: itemHeight,
-          length: itemDepth,
-          weight: itemWeight,
-          quantity: Math.max(1, itemQty),
-          color: validHex,
-          allowTilt: false,
-          allowRoll: false,
-          allowYaw: allowRot,
-          maxStackWeight: isFragile ? 0 : (itemHeight > 1800 ? 0 : 150),
-          fragile: isFragile,
-          floorPlacement: isFloorPlacement,
-          priority: itemWeight > 200 ? 1 : (itemWeight > 80 ? 2 : 3),
-          enabled: isEnabled
+        const worksheet = workbook.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
+        parseRowsToCargoItems(rawRows, `Excel (${lowerName.endsWith('.xls') ? '.xls' : '.xlsx'})`);
+      } else {
+        // CSV or Text file with BOM & quotes handling
+        const text = await file.text();
+        const cleanText = text.replace(/^\uFEFF/, '');
+        const lines = cleanText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+        const rawRows = lines.map(line => {
+          const regex = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^,]*))/g;
+          const row: string[] = [];
+          let match;
+          while ((match = regex.exec(line)) !== null) {
+            let val = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2] || '';
+            row.push(val.trim());
+          }
+          return row;
         });
+        parseRowsToCargoItems(rawRows, 'CSV');
       }
+    } catch (err: any) {
+      console.error('Error importing file:', err);
+      setImportNotification(
+        isJa
+          ? `ファイルの読み込みに失敗しました: ${err?.message || 'ファイル形式をご確認ください'}`
+          : `Failed to import file: ${err?.message || 'Please check file format'}`
+      );
+      setTimeout(() => setImportNotification(null), 5000);
+    }
 
-      if (newItems.length > 0) {
-        onChangeCargoList(newItems);
-        setImportNotification(isJa ? `CSVから ${newItems.length} 件の貨物データを正常に取り込みました！（割れ物・床置き・積載フラグ反映済）` : `Successfully imported ${newItems.length} cargo items from CSV with settings!`);
-        setTimeout(() => setImportNotification(null), 4000);
-      }
-    };
-    reader.readAsText(file, 'utf-8');
     e.target.value = '';
   };
+
+  // Backward compatibility
+  const handleImportCsv = handleImportFile;
 
   // Active / Selected items calculations
   const activeCargoList = cargoList.filter(c => c.enabled !== false);
@@ -416,20 +545,6 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const activeVolumeCbm = activeCargoList.reduce((sum, c) => sum + (c.length * c.width * c.height * c.quantity) / 1_000_000_000, 0);
   const activeWeightKg = activeCargoList.reduce((sum, c) => sum + (c.weight * c.quantity), 0);
   const containerVolCbm = (container.length * container.width * container.height) / 1_000_000_000;
-
-  // Safety limit calculation (capped at 500 units per line item)
-  const safetyCappedStats = useMemo(() => {
-    let truncatedCount = 0;
-    let itemsOverCap = 0;
-    activeCargoList.forEach(c => {
-      const q = Math.max(0, Number(c.quantity) || 0);
-      if (q > 500) {
-        truncatedCount += (q - 500);
-        itemsOverCap += 1;
-      }
-    });
-    return { truncatedCount, itemsOverCap };
-  }, [activeCargoList]);
 
   // Filtered and sorted manifest items
   const displayedCargoList = useMemo(() => {
@@ -468,289 +583,307 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   }, [cargoList, sortField, sortOrder, searchQuery]);
 
   return (
-    <div id="cargo-manager-root" className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs text-slate-800 flex flex-col h-full">
+    <div id="cargo-manager-root" className="bg-white border border-slate-200 rounded-xl p-3 sm:p-3.5 shadow-xs text-slate-800 flex flex-col h-full">
       {/* Header with Title & Action Buttons */}
-      <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-slate-100 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 mb-2.5 pb-2.5 border-b border-slate-100 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0" />
-            {isJa ? '積載貨物リスト (Cargo Manifest)' : 'Cargo Items'}
+            {isJa ? '積載貨物リスト' : 'Cargo Items'}
           </h2>
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className={`px-2 py-0.5 rounded-full border font-semibold text-[11px] ${
+          <div className="flex items-center gap-1 text-xs">
+            <span className={`px-2 py-0.5 rounded-full border font-semibold text-[10.5px] ${
               hasDisabledItems 
                 ? 'bg-amber-50 text-amber-800 border-amber-200' 
                 : 'bg-blue-50 text-blue-700 border-blue-200'
             }`}>
               {isJa 
-                ? `積載対象: ${activeCount}/${totalCount} 種類 (${activeQuantity}/${totalQuantity} 個)` 
-                : `Active: ${activeCount}/${totalCount} types (${activeQuantity}/${totalQuantity} pcs)`}
+                ? `積載対象: ${activeCount}/${totalCount}種 (${activeQuantity}/${totalQuantity}個)` 
+                : `Active: ${activeCount}/${totalCount} (${activeQuantity}/${totalQuantity} pcs)`}
             </span>
           </div>
         </div>
+      </div>
 
+      {/* Action Buttons Toolbar - Reordered & Grouped Logically */}
+      <div id="cargo-action-buttons-toolbar" className="space-y-1.5 mb-2.5">
+        {/* Row 1: Cargo Input & File Operations (+ Add -> Import -> Export -> Template -> Preset -> Reproduce) */}
         <div className="flex items-center gap-1.5 flex-wrap text-xs">
-          {/* Duplicate consolidation button if duplicates exist */}
-          {hasDuplicateItems && (
+          {/* 1. + Add Cargo (Primary Creation Action) */}
+          <button
+            type="button"
+            id="add-new-cargo-btn"
+            onClick={() => setIsAddingNew(!isAddingNew)}
+            title={isJa ? '新しい貨物を手動入力で追加' : 'Add new cargo item manually'}
+            className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs cursor-pointer shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{isJa ? '追加' : 'Add'}</span>
+          </button>
+
+          {/* 2. Import Cargo (Accepts both Excel .xlsx/.xls and CSV) */}
+          <label 
+            id="import-cargo-label" 
+            className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 cursor-pointer font-semibold flex items-center gap-1 transition-colors text-xs shadow-2xs shrink-0"
+            title={isJa ? 'Excelファイル (.xlsx, .xls) または CSVファイルから一括取込' : 'Import from Excel (.xlsx/.xls) or CSV'}
+          >
+            <Upload className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{isJa ? '取込' : 'Import'}</span>
+            <input 
+              type="file" 
+              accept=".xlsx, .xls, .csv, text/csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+              onChange={handleImportFile} 
+              className="hidden" 
+            />
+          </label>
+
+          {/* 3. Export Cargo (Excel & CSV) */}
+          <div className="relative shrink-0">
             <button
               type="button"
-              id="consolidate-duplicates-btn"
-              onClick={handleConsolidateDuplicates}
-              title={isJa ? '同一の品名・寸法・特性を持つ貨物を1行にまとめて数量集約' : 'Aggregate duplicate cargo entries into single rows'}
-              className="px-2.5 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold flex items-center gap-1 transition-colors animate-pulse"
+              id="export-cargo-btn"
+              onClick={() => {
+                setShowExportDropdown(!showExportDropdown);
+                setShowTemplateDropdown(false);
+              }}
+              disabled={cargoList.length === 0}
+              title={isJa ? '貨物リストをExcel (.xlsx) または CSVで出力保存' : 'Export Cargo List as Excel or CSV'}
+              className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs cursor-pointer shadow-2xs"
             >
-              <Layers className="w-3.5 h-3.5 text-amber-600" />
-              <span>{isJa ? '重複集約' : 'Aggregate'}</span>
+              <Download className="w-3.5 h-3.5 text-blue-600" />
+              <span>{isJa ? '保存' : 'Export'}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
             </button>
-          )}
 
-          {/* Quick Select All / Deselect All */}
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-            <button
-              type="button"
-              id="select-all-cargo-btn"
-              onClick={() => handleToggleAll(true)}
-              disabled={isAllSelected}
-              title={isJa ? 'すべての貨物を積載対象にする' : 'Select all items'}
-              className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
-                isAllSelected 
-                  ? 'text-slate-400 cursor-not-allowed' 
-                  : 'bg-white text-blue-700 shadow-2xs hover:bg-blue-50'
-              }`}
-            >
-              <CheckCheck className="w-3.5 h-3.5" />
-              <span>{isJa ? '全選択' : 'Select All'}</span>
-            </button>
-            <button
-              type="button"
-              id="deselect-all-cargo-btn"
-              onClick={() => handleToggleAll(false)}
-              disabled={isNoneSelected}
-              title={isJa ? 'すべての貨物の積載を解除する' : 'Deselect all items'}
-              className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors ${
-                isNoneSelected 
-                  ? 'text-slate-400 cursor-not-allowed' 
-                  : 'bg-white text-slate-700 shadow-2xs hover:bg-slate-50'
-              }`}
-            >
-              <XSquare className="w-3.5 h-3.5" />
-              <span>{isJa ? '全解除' : 'Deselect All'}</span>
-            </button>
-          </div>
-
-          {/* Vivid Colors Palette Switcher & Undo */}
-          <div className="relative">
-            <div className="flex items-center rounded-lg border border-pink-200 bg-gradient-to-r from-pink-50 via-purple-50 to-cyan-50 p-0.5 shadow-2xs">
-              <button
-                type="button"
-                id="apply-vivid-colors-direct-btn"
-                onClick={() => handleApplyPalette('vivid_neon')}
-                title={isJa ? '全貨物に超鮮やかなネオンカラーを一括適用' : 'Apply super vibrant neon colors to all items'}
-                className="px-2.5 py-1.5 rounded-md text-pink-700 hover:text-pink-900 font-bold flex items-center gap-1.5 transition-all active:scale-95 text-xs"
-              >
-                <Palette className="w-3.5 h-3.5 text-pink-600" />
-                <span>{isJa ? '鮮やかカラー' : 'Vivid Colors'}</span>
-              </button>
-              <button
-                type="button"
-                id="toggle-palette-menu-btn"
-                onClick={() => setShowColorMenu(!showColorMenu)}
-                title={isJa ? '鮮やかパレットの種類を選択' : 'Select color palette theme'}
-                className="px-1.5 py-1.5 rounded-md text-purple-700 hover:bg-white/80 transition-colors"
-              >
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showColorMenu ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
-
-            {/* Dropdown Menu for Palettes */}
-            {showColorMenu && (
+            {showExportDropdown && cargoList.length > 0 && (
               <div 
-                id="palette-dropdown-menu"
-                className="absolute right-0 top-full mt-1.5 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-50 animate-fade-in space-y-1"
+                id="export-dropdown-menu"
+                className="absolute top-full mt-1.5 left-0 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[175px] animate-fade-in text-xs font-medium"
               >
-                <div className="px-2 py-1 border-b border-slate-100 flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1">
-                    <Palette className="w-3.5 h-3.5 text-pink-600" />
-                    {isJa ? '鮮やか配色テーマの選択' : 'Select Vibrant Palette'}
-                  </span>
-                  {previousColors && (
-                    <button
-                      type="button"
-                      onClick={handleRevertColors}
-                      title={isJa ? '直前の配色に戻す' : 'Revert to previous colors'}
-                      className="text-[10px] text-slate-600 hover:text-slate-900 font-semibold flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-100"
-                    >
-                      <Undo2 className="w-3 h-3 text-slate-500" />
-                      <span>{isJa ? '元に戻す' : 'Revert'}</span>
-                    </button>
-                  )}
-                </div>
-
-                {COLOR_PALETTE_THEMES.map((theme) => {
-                  const isActive = activeThemeId === theme.id;
-                  return (
-                    <button
-                      key={theme.id}
-                      type="button"
-                      onClick={() => handleApplyPalette(theme.id)}
-                      className={`w-full text-left p-2 rounded-lg transition-all flex flex-col gap-1 ${
-                        isActive
-                          ? 'bg-purple-50/80 border border-purple-200 shadow-2xs'
-                          : 'hover:bg-slate-50 border border-transparent'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-800">
-                          {isJa ? theme.nameJa : theme.nameEn}
-                        </span>
-                        {isActive && (
-                          <span className="text-[10px] bg-purple-600 text-white font-bold px-1.5 py-0.5 rounded-full">
-                            {isJa ? '適用中' : 'Active'}
-                          </span>
-                        )}
-                      </div>
-                      {/* Color strip swatch */}
-                      <div className="flex items-center h-2.5 rounded-full overflow-hidden w-full shadow-2xs">
-                        {theme.colors.slice(0, 10).map((c, idx) => (
-                          <div key={idx} className="h-full flex-1" style={{ backgroundColor: c }} />
-                        ))}
-                      </div>
-                      <span className="text-[10px] text-slate-500 leading-tight">
-                        {isJa ? theme.descriptionJa : theme.descriptionEn}
-                      </span>
-                    </button>
-                  );
-                })}
-
-                {previousColors && (
-                  <div className="pt-1.5 border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={handleRevertColors}
-                      className="w-full py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <Undo2 className="w-3.5 h-3.5" />
-                      <span>{isJa ? '直前の配色に戻す' : 'Revert to Previous Colors'}</span>
-                    </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportExcel();
+                    setShowExportDropdown(false);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-slate-800">{isJa ? 'Excel保存' : 'Export Excel'}</div>
+                    <div className="text-[10px] text-slate-400">.xlsx 形式</div>
                   </div>
-                )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleExportCsv();
+                    setShowExportDropdown(false);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
+                >
+                  <Download className="w-4 h-4 text-blue-600 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-slate-800">{isJa ? 'CSV保存' : 'Export CSV'}</div>
+                    <div className="text-[10px] text-slate-400">.csv (カンマ区切り)</div>
+                  </div>
+                </button>
               </div>
             )}
           </div>
 
+          {/* 4. Template Download (Excel & CSV) */}
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              id="download-template-btn"
+              onClick={() => {
+                setShowTemplateDropdown(!showTemplateDropdown);
+                setShowExportDropdown(false);
+              }}
+              title={isJa ? 'Excel (.xlsx) または CSV形式の雛形テンプレートをダウンロード' : 'Download Excel or CSV Template'}
+              className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors text-xs cursor-pointer shadow-2xs"
+            >
+              <FileDown className="w-3.5 h-3.5 text-slate-600" />
+              <span>{isJa ? '雛形' : 'Template'}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
+            {showTemplateDropdown && (
+              <div 
+                id="template-dropdown-menu"
+                className="absolute top-full mt-1.5 left-0 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[175px] animate-fade-in text-xs font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleDownloadExcelTemplate();
+                    setShowTemplateDropdown(false);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 flex items-center gap-2 cursor-pointer transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-slate-800">{isJa ? 'Excel雛形' : 'Excel Template'}</div>
+                    <div className="text-[10px] text-slate-400">.xlsx (列幅・サンプル設定済)</div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleDownloadCsvTemplate();
+                    setShowTemplateDropdown(false);
+                  }}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
+                >
+                  <FileDown className="w-4 h-4 text-blue-600 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-slate-800">{isJa ? 'CSV雛形' : 'CSV Template'}</div>
+                    <div className="text-[10px] text-slate-400">.csv (UTF-8 BOM付き)</div>
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 5. Preset (Prebuilt Demo Cargoes) */}
           <button
+            type="button"
             id="open-presets-btn"
             onClick={() => setShowPresetsModal(true)}
-            className="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold flex items-center gap-1 transition-colors"
+            title={isJa ? '標準出荷サンプルのプリセットをワンクリック読込' : 'Load preconfigured cargo presets'}
+            className="px-2 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold flex items-center gap-1 transition-colors text-xs cursor-pointer shadow-2xs shrink-0"
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
             <span>{isJa ? 'プリセット' : 'Preset'}</span>
           </button>
 
-          <button
-            id="download-template-btn"
-            onClick={handleDownloadTemplate}
-            title={isJa ? '指定フォーマットのCSV雛形をダウンロード' : 'Download CSV Template'}
-            className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors"
-          >
-            <FileDown className="w-3.5 h-3.5 text-slate-600" />
-            <span>{isJa ? '雛形' : 'Template'}</span>
-          </button>
+          {/* 6. Loading_Manifest Import & 3D Reproduction */}
+          {onOpenImportManifest && (
+            <button
+              type="button"
+              id="cargo-manager-open-manifest-btn"
+              onClick={onOpenImportManifest}
+              title={isJa ? 'Loading_Manifestファイルから座標(X,Y,Z)を読み込み、3D積載を完全再現' : 'Import Loading Manifest and reproduce 3D loading placement'}
+              className="px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold flex items-center gap-1 transition-all active:scale-95 text-xs shadow-2xs cursor-pointer shrink-0"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
+              <span>{isJa ? '再現' : 'Reproduce'}</span>
+            </button>
+          )}
+        </div>
 
-          <label 
-            id="import-csv-label" 
-            className="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer font-medium flex items-center gap-1 transition-colors"
-            title={isJa ? 'CSVファイルから一括取込 (貨物名,幅,高さ,奥行,重量,個数,横回転許可,カラー,割れ物,積載対象)' : 'Import from CSV'}
-          >
-            <Upload className="w-3.5 h-3.5 text-emerald-600" />
-            <span>{isJa ? '取込' : 'Import'}</span>
-            <input type="file" accept=".csv" onChange={handleImportCsv} className="hidden" />
-          </label>
+        {/* Row 2: List Selection & Appearance (Select All / Deselect All, Vivid Colors, Duplicate Consolidate) */}
+        <div className="flex items-center justify-between gap-1.5 flex-wrap text-xs pt-0.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* 7. Quick Select All / Deselect All */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 shadow-2xs shrink-0">
+              <button
+                type="button"
+                id="select-all-cargo-btn"
+                onClick={() => handleToggleAll(true)}
+                disabled={isAllSelected}
+                title={isJa ? 'すべての貨物を積載対象にする' : 'Select all items'}
+                className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                  isAllSelected 
+                    ? 'text-slate-400 cursor-not-allowed' 
+                    : 'bg-white text-blue-700 shadow-2xs hover:bg-blue-50'
+                }`}
+              >
+                <CheckCheck className="w-3.5 h-3.5" />
+                <span>{isJa ? '全選択' : 'Select All'}</span>
+              </button>
+              <button
+                type="button"
+                id="deselect-all-cargo-btn"
+                onClick={() => handleToggleAll(false)}
+                disabled={isNoneSelected}
+                title={isJa ? 'すべての貨物の積載を解除する' : 'Deselect all items'}
+                className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                  isNoneSelected 
+                    ? 'text-slate-400 cursor-not-allowed' 
+                    : 'bg-white text-slate-700 shadow-2xs hover:bg-slate-50'
+                }`}
+              >
+                <XSquare className="w-3.5 h-3.5" />
+                <span>{isJa ? '全解除' : 'Deselect All'}</span>
+              </button>
+            </div>
 
-          <button
-            id="export-csv-btn"
-            onClick={handleExportCsv}
-            title={isJa ? '貨物リストをCSV出力' : 'Export CSV'}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors"
-          >
-            <Download className="w-3.5 h-3.5 text-blue-600" />
-            <span>{isJa ? '保存' : 'Export'}</span>
-          </button>
-
-          <button
-            id="add-new-cargo-btn"
-            onClick={() => setIsAddingNew(!isAddingNew)}
-            className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{isJa ? '追加' : 'Add'}</span>
-          </button>
+            {/* Duplicate consolidation button if duplicates exist */}
+            {hasDuplicateItems && (
+              <button
+                type="button"
+                id="consolidate-duplicates-btn"
+                onClick={handleConsolidateDuplicates}
+                title={isJa ? '同一の品名・寸法・特性を持つ貨物を1行にまとめて数量集約' : 'Aggregate duplicate cargo entries into single rows'}
+                className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold flex items-center gap-1 transition-colors animate-pulse text-xs cursor-pointer shrink-0"
+              >
+                <Layers className="w-3.5 h-3.5 text-amber-600" />
+                <span>{isJa ? '重複集約' : 'Aggregate'}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Import Notification Banner */}
+      {/* Import / Clear Notification Banner */}
       {importNotification && (
-        <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs flex items-center gap-2 animate-fade-in">
+        <div className="mb-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs flex items-center gap-2 animate-fade-in shadow-2xs">
           <Check className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{importNotification}</span>
         </div>
       )}
 
-      {/* Safety Limit Warning Banner if items capped */}
-      {safetyCappedStats.truncatedCount > 0 && (
-        <div id="cargo-safety-limit-banner" className="mb-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 text-xs flex items-start gap-2.5 shadow-xs">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <span className="font-bold">
-              {isJa 
-                ? `${safetyCappedStats.truncatedCount.toLocaleString()} 個の貨物が安全リミットにより除外されました`
-                : `${safetyCappedStats.truncatedCount.toLocaleString()} items excluded by the safety limit`}
+      {/* Real-Time Total Metrics - Simplified Single Row */}
+      <div 
+        id="cargo-summary-metrics-bar"
+        className="flex items-center justify-between gap-1 sm:gap-2 mb-2 px-2.5 py-1.5 bg-slate-50/90 rounded-lg border border-slate-200 text-xs shadow-2xs"
+      >
+        {/* Volume Metric */}
+        <div 
+          className="flex items-center gap-1 min-w-0" 
+          title={isJa ? `容積: ${formatVolume(activeVolumeCbm, unitSystem, 2)} / 上限 ${formatVolume(containerVolCbm, unitSystem, 2)}` : `Volume: ${formatVolume(activeVolumeCbm, unitSystem, 2)} / Limit ${formatVolume(containerVolCbm, unitSystem, 2)}`}
+        >
+          <span className="text-[10px] sm:text-[10.5px] text-slate-500 font-medium shrink-0">{isJa ? '容積' : 'Vol'}:</span>
+          <div className="flex items-baseline gap-0.5 font-mono text-[11px] sm:text-xs">
+            <span className="font-bold text-blue-600">
+              {formatVolume(activeVolumeCbm, unitSystem, 1)}
             </span>
-            <p className="text-[11px] text-amber-800 leading-relaxed">
-              {isJa 
-                ? `ブラウザのパフォーマンス保護のため、1品目あたりの最適化計算上限は500個となります。${safetyCappedStats.itemsOverCap}件の品目で500個を超える数量が登録されています（計算対象は各品目最大500個）。` 
-                : `To protect browser performance, packing optimization is capped at 500 units per line item. ${safetyCappedStats.itemsOverCap} items exceed this limit (calculated at max 500 each).`}
-            </p>
+            <span className="text-slate-400 text-[10px]">/{formatVolume(containerVolCbm, unitSystem, 0)}</span>
           </div>
         </div>
-      )}
 
-      {/* Real-Time Total Metrics for Active / Enabled Items vs Container Limit */}
-      <div className="grid grid-cols-3 gap-2.5 mb-4 text-xs bg-slate-50 p-3 rounded-xl border border-slate-200">
-        <div>
-          <span className="text-slate-500 block text-[11px] font-medium">
-            {isJa ? '積載対象 総容積' : 'Active Volume:'}
-            {hasDisabledItems && <span className="text-amber-600 font-bold ml-1">({isJa ? '対象のみ' : 'Filtered'})</span>}
-          </span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="font-mono font-bold text-blue-600 text-sm">
-              {formatVolume(activeVolumeCbm, unitSystem, 2)}
+        <div className="w-px h-3.5 bg-slate-200 shrink-0" />
+
+        {/* Weight Metric */}
+        <div 
+          className="flex items-center gap-1 min-w-0" 
+          title={isJa ? `重量: ${formatWeightCompact(activeWeightKg, unitSystem)} / 最大積載 ${formatWeightCompact(container.maxWeight, unitSystem)}` : `Weight: ${formatWeightCompact(activeWeightKg, unitSystem)} / Max ${formatWeightCompact(container.maxWeight, unitSystem)}`}
+        >
+          <span className="text-[10px] sm:text-[10.5px] text-slate-500 font-medium shrink-0">{isJa ? '重量' : 'Wt'}:</span>
+          <div className="flex items-baseline gap-0.5 font-mono text-[11px] sm:text-xs">
+            <span className={`font-bold ${activeWeightKg > container.maxWeight ? 'text-red-600' : 'text-emerald-600'}`}>
+              {formatWeightCompact(activeWeightKg, unitSystem)}
             </span>
-            <span className="text-slate-400 text-[10px]">/ {formatVolume(containerVolCbm, unitSystem, 1)}</span>
+            <span className="text-slate-400 text-[10px]">/{formatWeightCompact(container.maxWeight, unitSystem)}</span>
           </div>
         </div>
-        <div>
-          <span className="text-slate-500 block text-[11px] font-medium">
-            {isJa ? '積載対象 総重量' : 'Active Weight:'}
-            {hasDisabledItems && <span className="text-amber-600 font-bold ml-1">({isJa ? '対象のみ' : 'Filtered'})</span>}
+
+        <div className="w-px h-3.5 bg-slate-200 shrink-0" />
+
+        {/* Fill Percentage Metric */}
+        <div 
+          className="flex items-center gap-1 min-w-0 shrink-0" 
+          title={isJa ? 'コンテナ容積利用率(目安)' : 'Estimated Volume Fill Rate'}
+        >
+          <span className="text-[10px] sm:text-[10.5px] text-slate-500 font-medium shrink-0">{isJa ? '利用率' : 'Fill'}:</span>
+          <span className={`font-mono font-bold text-[11px] sm:text-xs ${activeVolumeCbm > containerVolCbm ? 'text-red-600' : 'text-slate-800'}`}>
+            {containerVolCbm > 0 ? ((activeVolumeCbm / containerVolCbm) * 100).toFixed(1) : 0}%
           </span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className={`font-mono font-bold text-sm ${activeWeightKg > container.maxWeight ? 'text-red-600' : 'text-emerald-600'}`}>
-              {formatWeight(activeWeightKg, unitSystem)}
-            </span>
-            <span className="text-slate-400 text-[10px]">/ {formatWeight(container.maxWeight, unitSystem)}</span>
-          </div>
-        </div>
-        <div>
-          <span className="text-slate-500 block text-[11px] font-medium">{isJa ? 'コンテナ利用率(目安)' : 'Est. Fill:'}</span>
-          <div className="flex items-baseline gap-1 mt-0.5">
-            <span className={`font-mono font-bold text-sm ${activeVolumeCbm > containerVolCbm ? 'text-red-600' : 'text-slate-800'}`}>
-              {containerVolCbm > 0 ? ((activeVolumeCbm / containerVolCbm) * 100).toFixed(1) : 0}%
-            </span>
-            {activeVolumeCbm > containerVolCbm && (
-              <span className="text-[10px] text-red-600 font-bold ml-1">({isJa ? '容量超過' : 'Over'})</span>
-            )}
-          </div>
+          {activeVolumeCbm > containerVolCbm && (
+            <span className="text-[9px] text-red-600 font-bold px-1 bg-red-100 rounded">(!)</span>
+          )}
         </div>
       </div>
 
@@ -929,14 +1062,14 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         </form>
       )}
 
-      {/* Manifest Search & Sorting Toolbar */}
+      {/* Manifest Search & Sorting Toolbar - Compact & Non-overflowing */}
       {cargoList.length > 0 && (
         <div 
           id="cargo-manifest-controls" 
-          className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3 bg-slate-50/90 p-2.5 rounded-xl border border-slate-200"
+          className="space-y-1.5 mb-2.5 bg-slate-50/90 p-2 sm:p-2.5 rounded-xl border border-slate-200 shadow-2xs"
         >
-          {/* Quick Search Field */}
-          <div className="relative flex-1 min-w-[160px]">
+          {/* Quick Search Field - Full width for seamless typing without clipping */}
+          <div className="relative w-full">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
@@ -944,7 +1077,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={isJa ? '品名・型番で検索...' : 'Search items or SKU...'}
-              className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-7 py-1.5 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-2xs"
+              className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-7 py-1 text-xs text-slate-800 placeholder-slate-400 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-2xs"
             />
             {searchQuery && (
               <button
@@ -959,141 +1092,163 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             )}
           </div>
 
-          {/* Sort Controls (Name, Weight, Quantity) */}
-          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-            <span className="text-[11px] font-medium text-slate-500 flex items-center gap-1 shrink-0">
-              <ArrowUpDown className="w-3 h-3 text-slate-400" />
-              <span>{isJa ? '並び替え:' : 'Sort:'}</span>
-            </span>
+          {/* Sort Controls Row - Neatly arranged, guaranteed no horizontal overflow */}
+          <div className="flex items-center justify-between gap-1.5 flex-wrap text-xs pt-0.5">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] sm:text-[10.5px] font-medium text-slate-500 flex items-center gap-0.5 shrink-0">
+                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                <span>{isJa ? '並替:' : 'Sort:'}</span>
+              </span>
 
-            {/* Sort Field Segmented Buttons */}
-            <div className="inline-flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
-              {/* Sort by Name */}
-              <button
-                type="button"
-                id="sort-by-name-btn"
-                onClick={() => handleSortToggle('name')}
-                title={isJa 
-                  ? (sortField === 'name' ? (sortOrder === 'asc' ? '品名: A→Z (昇順) - クリックで降順' : '品名: Z→A (降順) - クリックで昇順') : '品名で並び替え') 
-                  : 'Sort by name'}
-                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
-                  sortField === 'name'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <span>{isJa ? '品名' : 'Name'}</span>
-                {sortField === 'name' && (
-                  sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                )}
-              </button>
+              {/* Sort Field Segmented Buttons */}
+              <div className="inline-flex items-center bg-white border border-slate-200 rounded-md p-0.5 shadow-2xs">
+                {/* Sort by Name */}
+                <button
+                  type="button"
+                  id="sort-by-name-btn"
+                  onClick={() => handleSortToggle('name')}
+                  title={isJa 
+                    ? (sortField === 'name' ? (sortOrder === 'asc' ? '品名: A→Z (昇順)' : '品名: Z→A (降順)') : '品名で並び替え') 
+                    : 'Sort by name'}
+                  className={`px-2 py-0.5 rounded text-[10.5px] sm:text-[11px] font-semibold flex items-center gap-0.5 transition-all cursor-pointer ${
+                    sortField === 'name'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{isJa ? '品名' : 'Name'}</span>
+                  {sortField === 'name' && (
+                    sortOrder === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />
+                  )}
+                </button>
 
-              {/* Sort by Weight */}
-              <button
-                type="button"
-                id="sort-by-weight-btn"
-                onClick={() => handleSortToggle('weight')}
-                title={isJa 
-                  ? (sortField === 'weight' ? (sortOrder === 'asc' ? '重量: 軽い順 (昇順) - クリックで重い順' : '重量: 重い順 (降順) - クリックで軽い順') : '重量で並び替え') 
-                  : 'Sort by weight'}
-                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
-                  sortField === 'weight'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <span>{isJa ? '重量' : 'Weight'}</span>
-                {sortField === 'weight' && (
-                  sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                )}
-              </button>
+                {/* Sort by Weight */}
+                <button
+                  type="button"
+                  id="sort-by-weight-btn"
+                  onClick={() => handleSortToggle('weight')}
+                  title={isJa 
+                    ? (sortField === 'weight' ? (sortOrder === 'asc' ? '重量: 昇順' : '重量: 降順') : '重量で並び替え') 
+                    : 'Sort by weight'}
+                  className={`px-2 py-0.5 rounded text-[10.5px] sm:text-[11px] font-semibold flex items-center gap-0.5 transition-all cursor-pointer ${
+                    sortField === 'weight'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{isJa ? '重量' : 'Weight'}</span>
+                  {sortField === 'weight' && (
+                    sortOrder === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />
+                  )}
+                </button>
 
-              {/* Sort by Quantity */}
-              <button
-                type="button"
-                id="sort-by-quantity-btn"
-                onClick={() => handleSortToggle('quantity')}
-                title={isJa 
-                  ? (sortField === 'quantity' ? (sortOrder === 'asc' ? '数量: 少ない順 (昇順) - クリックで多い順' : '数量: 多い順 (降順) - クリックで少ない順') : '数量で並び替え') 
-                  : 'Sort by quantity'}
-                className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
-                  sortField === 'quantity'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <span>{isJa ? '数量' : 'Qty'}</span>
-                {sortField === 'quantity' && (
-                  sortOrder === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                )}
-              </button>
+                {/* Sort by Quantity */}
+                <button
+                  type="button"
+                  id="sort-by-quantity-btn"
+                  onClick={() => handleSortToggle('quantity')}
+                  title={isJa 
+                    ? (sortField === 'quantity' ? (sortOrder === 'asc' ? '数量: 昇順' : '数量: 降順') : '数量で並び替え') 
+                    : 'Sort by quantity'}
+                  className={`px-2 py-0.5 rounded text-[10.5px] sm:text-[11px] font-semibold flex items-center gap-0.5 transition-all cursor-pointer ${
+                    sortField === 'quantity'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{isJa ? '数量' : 'Qty'}</span>
+                  {sortField === 'quantity' && (
+                    sortOrder === 'asc' ? <ArrowUp className="w-2.5 h-2.5" /> : <ArrowDown className="w-2.5 h-2.5" />
+                  )}
+                </button>
+              </div>
+
+              {/* Reset to Original Manifest Order */}
+              {sortField !== 'none' && (
+                <button
+                  type="button"
+                  id="reset-sort-btn"
+                  onClick={handleResetSort}
+                  title={isJa ? '元の登録順に戻す' : 'Reset to original manifest order'}
+                  className="px-1.5 py-0.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-500 rounded text-[10px] sm:text-[10.5px] font-medium flex items-center gap-0.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-2.5 h-2.5 text-slate-400" />
+                  <span>{isJa ? '解除' : 'Reset'}</span>
+                </button>
+              )}
             </div>
 
-            {/* Explicit Sort Direction Toggle */}
-            {sortField !== 'none' && (
-              <button
-                type="button"
-                id="toggle-sort-order-btn"
-                onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                title={isJa ? (sortOrder === 'asc' ? '昇順 (クリックで降順に変更)' : '降順 (クリックで昇順に変更)') : 'Toggle sort order'}
-                className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-medium flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-              >
-                {sortOrder === 'asc' ? (
-                  <>
-                    <ArrowUp className="w-3 h-3 text-blue-600" />
-                    <span className="text-[11px]">{isJa ? '昇順' : 'Asc'}</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowDown className="w-3 h-3 text-blue-600" />
-                    <span className="text-[11px]">{isJa ? '降順' : 'Desc'}</span>
-                  </>
-                )}
-              </button>
-            )}
+            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+              {/* Apply sorted order to manifest */}
+              {sortField !== 'none' && (
+                <button
+                  type="button"
+                  id="apply-sort-order-btn"
+                  onClick={handleApplySortToManifest}
+                  title={isJa ? '現在の並び順をマニフェスト（登録順）に保存して固定' : 'Save current order to manifest list'}
+                  className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-[10px] sm:text-[10.5px] font-bold flex items-center gap-0.5 shadow-2xs transition-colors cursor-pointer"
+                >
+                  <Check className="w-2.5 h-2.5 text-indigo-600" />
+                  <span>{isJa ? '順固定' : 'Save'}</span>
+                </button>
+              )}
 
-            {/* Reset to Original Manifest Order */}
-            {sortField !== 'none' && (
-              <button
-                type="button"
-                id="reset-sort-btn"
-                onClick={handleResetSort}
-                title={isJa ? '元の登録順に戻す' : 'Reset to original manifest order'}
-                className="px-2 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-              >
-                <RotateCcw className="w-3 h-3 text-slate-500" />
-                <span className="text-[11px]">{isJa ? '解除' : 'Reset'}</span>
-              </button>
-            )}
-
-            {/* Apply sorted order to manifest */}
-            {sortField !== 'none' && (
-              <button
-                type="button"
-                id="apply-sort-order-btn"
-                onClick={handleApplySortToManifest}
-                title={isJa ? '現在の並び順をマニフェスト（登録順）に保存して固定' : 'Save current order to manifest list'}
-                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-              >
-                <Check className="w-3 h-3 text-indigo-600" />
-                <span className="text-[11px]">{isJa ? '並び順を固定' : 'Save Order'}</span>
-              </button>
-            )}
-
-            {/* Display count */}
-            <span className="text-[11px] text-slate-400 font-mono pl-1">
-              {displayedCargoList.length}/{cargoList.length}
-            </span>
+              {/* Display count */}
+              <span className="text-[10px] text-slate-400 font-mono">
+                {displayedCargoList.length}/{cargoList.length}
+              </span>
+            </div>
           </div>
         </div>
       )}
 
       {/* Cargo List Items Table */}
-      <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 max-h-[540px] xl:max-h-[600px] custom-scrollbar">
+      <div className="flex-1 overflow-y-auto pr-1 space-y-1.5 max-h-[540px] xl:max-h-[600px] custom-scrollbar">
         {cargoList.length === 0 ? (
-          <div className="text-center py-10 text-slate-400 text-xs">
-            <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-            <p>{isJa ? '貨物が登録されていません。「CSV取込」または「サンプル混載プリセット」を選択してください。' : 'No cargo items yet. Click "Import" or load a sample preset.'}</p>
+          <div className="text-center py-10 text-slate-400 text-xs space-y-3 bg-slate-50/70 rounded-xl border border-dashed border-slate-300 p-6">
+            <FileSpreadsheet className="w-9 h-9 mx-auto text-slate-300" />
+            <div className="space-y-1">
+              <p className="font-bold text-slate-700 text-sm">
+                {isJa ? '貨物が登録されていません' : 'No cargo items yet'}
+              </p>
+              <p className="text-slate-500 text-[11px]">
+                {isJa ? '「新規貨物の追加」「Excel / CSV取込」または「混載プリセット」を選択してください。' : 'Add items manually, import an Excel/CSV file, or load a sample preset.'}
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 flex-wrap pt-2">
+              <button
+                type="button"
+                id="empty-open-presets-btn"
+                onClick={() => setShowPresetsModal(true)}
+                className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold flex items-center gap-1 text-xs cursor-pointer shadow-2xs transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                <span>{isJa ? '混載プリセット読込' : 'Load Preset'}</span>
+              </button>
+              <label 
+                id="empty-import-file-label" 
+                className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold flex items-center gap-1.5 text-xs cursor-pointer shadow-2xs transition-colors"
+                title={isJa ? 'Excel (.xlsx/.xls) または CSVファイルから一括取込' : 'Import from Excel or CSV'}
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{isJa ? 'Excel / CSV取込' : 'Import Excel / CSV'}</span>
+                <input 
+                  type="file" 
+                  accept=".xlsx, .xls, .csv, text/csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+                  onChange={handleImportFile} 
+                  className="hidden" 
+                />
+              </label>
+              <button
+                type="button"
+                id="empty-add-item-btn"
+                onClick={() => setIsAddingNew(true)}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 text-xs cursor-pointer shadow-xs transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isJa ? '新規貨物を追加' : 'Add New Item'}</span>
+              </button>
+            </div>
           </div>
         ) : displayedCargoList.length === 0 ? (
           <div className="text-center py-8 text-slate-400 text-xs bg-slate-50 rounded-xl border border-slate-200">
@@ -1118,7 +1273,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             return (
               <div
                 key={cargo.id}
-                className={`border rounded-xl p-3 transition-all text-xs shadow-xs ${
+                className={`border rounded-lg p-2 sm:p-2.5 transition-all text-xs shadow-2xs ${
                   isEditing 
                     ? 'border-blue-500 ring-1 ring-blue-500/20 bg-blue-50/20' 
                     : isEnabled
@@ -1126,17 +1281,17 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       : 'bg-slate-50/80 border-slate-200/60 opacity-60 hover:opacity-90'
                 }`}
               >
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   {/* Top Primary Row: Checkbox, Color, Name, and Actions (Qty, Edit, Delete) */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
                       {/* Enable / Disable Checkbox Toggle */}
                       <button
                         type="button"
                         id={`toggle-cargo-${cargo.id}`}
                         onClick={() => handleUpdateItem(cargo.id, { enabled: !isEnabled })}
                         title={isJa ? (isEnabled ? 'クリックして積載から除外' : 'クリックして積載対象に含める') : (isEnabled ? 'Click to exclude from packing' : 'Click to include in packing')}
-                        className={`p-0.5 rounded transition-colors ${
+                        className={`p-0.5 rounded transition-colors shrink-0 ${
                           isEnabled 
                             ? 'text-blue-600 hover:bg-blue-50' 
                             : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
@@ -1151,7 +1306,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
 
                       {/* Color Indicator */}
                       <div
-                        className="w-3 h-3 rounded-full shrink-0 border border-black/15 shadow-2xs cursor-pointer hover:scale-110 transition-transform"
+                        className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/15 shadow-2xs cursor-pointer hover:scale-125 transition-transform"
                         style={{ backgroundColor: cargo.color }}
                         title={isJa ? `カラー: ${cargo.color} (クリックで編集)` : `Color: ${cargo.color}`}
                         onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
@@ -1159,7 +1314,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
 
                       {/* Cargo SKU / Name */}
                       <span 
-                        className={`font-bold truncate text-xs ${isEnabled ? 'text-slate-900' : 'text-slate-400 line-through'}`}
+                        className={`font-bold truncate text-[11.5px] sm:text-xs ${isEnabled ? 'text-slate-900' : 'text-slate-400 line-through'}`}
                         title={cargo.name}
                       >
                         {cargo.name}
@@ -1167,9 +1322,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                     </div>
 
                     {/* Quantity & Action Controls */}
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md px-1.5 py-0.5">
-                        <span className="text-[10px] text-slate-500 mr-1 font-medium">{isJa ? '数量:' : 'Qty:'}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5 shadow-2xs">
+                        <span className="text-[9.5px] text-slate-500 mr-0.5 font-medium">{isJa ? '数量:' : 'Qty:'}</span>
                         <input
                           type="number"
                           min="1"
@@ -1178,7 +1333,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                             const val = Math.max(1, Number(e.target.value) || 1);
                             handleUpdateItem(cargo.id, { quantity: val });
                           }}
-                          className="w-12 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
+                          className="w-9 sm:w-10 bg-transparent text-center font-bold text-amber-600 outline-none text-xs"
                         />
                       </div>
 
@@ -1187,17 +1342,17 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                           title={isJa 
                             ? `安全リミット適用中: ${cargo.quantity.toLocaleString()}個中 500個を計算対象とし、${(cargo.quantity - 500).toLocaleString()}個を除外しています` 
                             : `Safety limit: 500 of ${cargo.quantity.toLocaleString()} calculated, ${(cargo.quantity - 500).toLocaleString()} excluded`}
-                          className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 cursor-help shrink-0"
+                          className="bg-amber-100 text-amber-900 border border-amber-300 text-[9.5px] px-1 py-0.5 rounded font-bold flex items-center gap-0.5 cursor-help shrink-0"
                         >
                           <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                          <span>上限500 (-{(cargo.quantity - 500).toLocaleString()})</span>
+                          <span>-{(cargo.quantity - 500).toLocaleString()}</span>
                         </span>
                       )}
 
                       <button
                         onClick={() => setEditingItemId(isEditing ? null : cargo.id)}
                         title={isJa ? '寸法・重量を編集' : 'Edit dimensions'}
-                        className={`p-1.5 rounded-md transition-colors ${
+                        className={`p-1 rounded transition-colors ${
                           isEditing ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100'
                         }`}
                       >
@@ -1207,7 +1362,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       <button
                         onClick={() => handleDeleteItem(cargo.id)}
                         title={isJa ? '削除' : 'Delete'}
-                        className="p-1.5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1215,20 +1370,20 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                   </div>
 
                   {/* Sub-row: Dimensions, Weight, and Quick Toggle Rules */}
-                  <div className="flex items-center justify-between gap-2 pt-0.5 text-[11px] text-slate-600 flex-wrap">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-mono font-semibold bg-slate-100 px-1.5 py-0.5 rounded text-[10.5px] text-slate-700">
-                        {cargo.width} × {cargo.height} × {cargo.length} mm
+                  <div className="flex items-center justify-between gap-1.5 pt-0.5 text-slate-600 flex-wrap">
+                    <div className="flex items-center gap-1.5 min-w-0 font-mono text-[10px] sm:text-[10.5px]">
+                      <span className="font-semibold text-slate-700 bg-slate-100 px-1 py-0.5 rounded text-[9.5px] sm:text-[10px] shrink-0">
+                        {cargo.width}×{cargo.height}×{cargo.length}
                       </span>
-                      <span className="text-emerald-600 font-bold font-mono text-[10.5px]">
+                      <span className="text-emerald-700 font-bold shrink-0">
                         {formatWeightCompact(cargo.weight, unitSystem)}
                       </span>
-                      <span className="text-slate-400 font-mono text-[10px]">
+                      <span className="text-slate-400 text-[9.5px] truncate hidden sm:inline">
                         ({formatVolume((cargo.length * cargo.width * cargo.height * cargo.quantity) / 1_000_000_000, unitSystem)})
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1 shrink-0 ml-auto">
                       {/* Horizontal Rotation Toggle */}
                       <button
                         type="button"
@@ -1237,15 +1392,15 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                           allowTilt: false,
                           allowRoll: false
                         })}
-                        title={isJa ? 'クリックで横回転許可(天面維持・90度旋回)を切替' : 'Toggle horizontal rotation (keep height upright)'}
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors border flex items-center gap-1 ${
+                        title={isJa ? 'クリックで横回転許可(90度旋回)を切替' : 'Toggle rotation'}
+                        className={`text-[9.5px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors border flex items-center gap-0.5 ${
                           cargo.allowYaw !== false 
                             ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
                             : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
                         }`}
                       >
-                        <RotateCw className="w-3 h-3" />
-                        <span>{isJa ? `横回転:${cargo.allowYaw !== false ? '可' : '否'}` : `Rot:${cargo.allowYaw !== false ? 'ON' : 'OFF'}`}</span>
+                        <RotateCw className="w-2.5 h-2.5" />
+                        <span>{isJa ? (cargo.allowYaw !== false ? '回転' : '固定') : (cargo.allowYaw !== false ? 'Rot' : 'Lock')}</span>
                       </button>
 
                       {/* Fragile Toggle */}
@@ -1256,14 +1411,14 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                           maxStackWeight: !cargo.fragile ? 0 : 150
                         })}
                         title={isJa ? 'クリックで割れ物(上積み禁止)を切替' : 'Toggle fragile'}
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors flex items-center gap-1 border ${
+                        className={`text-[9.5px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors flex items-center gap-0.5 border ${
                           cargo.fragile
                             ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100 font-bold'
-                            : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                            : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'
                         }`}
                       >
-                        <ShieldAlert className="w-3 h-3" />
-                        <span>{isJa ? `割れ物:${cargo.fragile ? '有' : '無'}` : `Fragile:${cargo.fragile ? 'YES' : 'NO'}`}</span>
+                        <ShieldAlert className="w-2.5 h-2.5" />
+                        <span>{cargo.fragile ? (isJa ? '割物' : 'Fragile') : (isJa ? '割無' : 'No')}</span>
                       </button>
 
                       {/* Floor Placement Toggle */}
@@ -1273,15 +1428,15 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                         onClick={() => handleUpdateItem(cargo.id, { 
                           floorPlacement: !cargo.floorPlacement 
                         })}
-                        title={isJa ? 'クリックで床置き指定(必ずコンテナ床面 z=0 に配置)を切替' : 'Toggle floor placement (must be placed on container floor z=0)'}
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors flex items-center gap-1 border ${
+                        title={isJa ? 'クリックで床置き指定(コンテナ床面に配置)を切替' : 'Toggle floor placement'}
+                        className={`text-[9.5px] px-1.5 py-0.5 rounded font-medium cursor-pointer transition-colors flex items-center gap-0.5 border ${
                           cargo.floorPlacement
                             ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 font-bold'
-                            : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200 hover:text-slate-600'
+                            : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100 hover:text-slate-600'
                         }`}
                       >
-                        <ArrowDownToLine className="w-3 h-3" />
-                        <span>{isJa ? `床置き:${cargo.floorPlacement ? '要' : '否'}` : `Floor:${cargo.floorPlacement ? 'YES' : 'NO'}`}</span>
+                        <ArrowDownToLine className="w-2.5 h-2.5" />
+                        <span>{cargo.floorPlacement ? (isJa ? '床置' : 'Floor') : (isJa ? '床無' : 'No')}</span>
                       </button>
                     </div>
                   </div>

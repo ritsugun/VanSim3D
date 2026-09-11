@@ -3,7 +3,7 @@ import { AlgorithmType, GAGoalConfig, Language, UnitSystem, AutoSelectCriteria }
 import { 
   Box, Sparkles, Cpu, Target, Globe, Gauge, 
   RefreshCw, Check, Layers, Scale, Sliders, Zap, Bot,
-  BarChart3, ListOrdered, Truck, AlertTriangle
+  BarChart3, ListOrdered, Truck, AlertTriangle, Trash2, FileSpreadsheet
 } from 'lucide-react';
 
 export type TabType = '3d' | 'cargo' | 'container' | 'analytics' | 'manifest';
@@ -24,9 +24,12 @@ interface HeaderProps {
   onChangeUnitSystem?: (unit: UnitSystem) => void;
   onOpenAiConsultant: () => void;
   onOpenBenchmarkModal?: () => void;
+  onOpenImportManifest?: () => void;
   onAutoSelectBest?: () => void;
   onReoptimize: () => void;
+  onAllClear?: () => void;
   isCalculating: boolean;
+  showCalculatingPopup?: boolean;
   showAlgorithmPanel?: boolean;
   onToggleAlgorithmPanel?: () => void;
   
@@ -56,9 +59,12 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeLanguage,
   onOpenAiConsultant,
   onOpenBenchmarkModal,
+  onOpenImportManifest,
   onAutoSelectBest,
   onReoptimize,
+  onAllClear,
   isCalculating,
+  showCalculatingPopup = false,
   showAlgorithmPanel,
   onToggleAlgorithmPanel,
   activeTab = '3d',
@@ -98,7 +104,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header id="app-header" className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
       {/* Top Bar: Brand, Algorithm Engine Controls & Actions */}
-      <div className="px-3 sm:px-5 py-1 sm:py-1.5 border-b border-slate-100">
+      <div className="px-3 sm:px-5 py-1 border-b border-slate-100">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 flex-wrap">
           {/* Brand Title */}
           <div className="flex items-center gap-2">
@@ -266,6 +272,20 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
 
+            {/* Loading_Manifest Import & Reproduce Button */}
+            {onOpenImportManifest && (
+              <button
+                id="header-open-manifest-btn"
+                type="button"
+                onClick={onOpenImportManifest}
+                className="px-2 py-0.5 rounded-md bg-white hover:bg-slate-100 text-slate-900 font-bold text-[11px] flex items-center gap-1 shadow-xs border border-slate-300 transition-all active:scale-95 group"
+                title={isJa ? 'Loading_Manifestファイル取込 & 3D積載再現' : 'Import Loading Manifest & Reproduce 3D Layout'}
+              >
+                <FileSpreadsheet className="w-3 h-3 text-blue-600 group-hover:scale-110 transition-transform" />
+                <span>{isJa ? 'マニフェスト再現' : 'Manifest'}</span>
+              </button>
+            )}
+
             {/* Benchmark & Auto Comparison Button */}
             {onOpenBenchmarkModal && (
               <button
@@ -290,6 +310,20 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{isJa ? 'AI診断' : 'AI Advisor'}</span>
             </button>
 
+            {/* All Clear Button in Header */}
+            {onAllClear && (
+              <button
+                id="header-all-clear-btn"
+                type="button"
+                onClick={onAllClear}
+                className="px-2 py-0.5 rounded-md bg-red-50 hover:bg-red-100 text-red-700 font-bold text-[11px] flex items-center gap-1 shadow-xs border border-red-200 transition-all active:scale-95 cursor-pointer"
+                title={isJa ? 'すべての登録貨物をクリア (All Clear)' : 'Clear all cargo items (All Clear)'}
+              >
+                <Trash2 className="w-3 h-3 text-red-600" />
+                <span>All Clear</span>
+              </button>
+            )}
+
             {/* Re-optimize / Run Button */}
             <button
               id="run-reoptimize-btn"
@@ -301,7 +335,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{isCalculating ? (isJa ? '計算中...' : 'Optimizing...') : (isJa ? '再計算' : 'Re-calculate')}</span>
             </button>
 
-            {isCalculating && (
+            {showCalculatingPopup && (
               <div 
                 id="header-calculating-indicator"
                 className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-600 text-white font-mono text-[10px] font-bold shadow-xs animate-pulse"
@@ -315,14 +349,47 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Navigation Tabs & Live Metrics Status Ribbon in Sticky Header */}
-      <div className="px-3 sm:px-5 py-1 bg-slate-50/90 backdrop-blur-xs">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 flex-wrap">
-          {/* Navigation Buttons */}
+      <div className="px-3 sm:px-5 py-0.5 bg-slate-50/90 backdrop-blur-xs">
+        <div className="max-w-7xl mx-auto flex flex-col gap-0.5">
+          {/* 1st Row: Quick Summary Metrics Label (Right-aligned) */}
+          <div className="flex justify-end w-full -mb-0.5">
+            <div className="flex items-center gap-2 bg-white border border-slate-300 px-2 py-0.5 rounded text-slate-600 shadow-2xs text-[10.5px] leading-tight w-fit flex-wrap">
+              <span className="flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />
+                {isJa ? '台数:' : 'Containers:'}{' '}
+                <strong className="text-slate-900 font-mono font-bold">{containerUnitsCount} {isJa ? '台' : 'units'}</strong>
+              </span>
+              <span className="text-slate-300">|</span>
+              <span>
+                {isJa ? '積載:' : 'Packed:'}{' '}
+                <strong className="text-slate-900 font-mono font-bold">{packedItemCount.toLocaleString()} / {totalItemCount.toLocaleString()}</strong>
+                {safetyLimitTruncatedCount > 0 && (
+                  <span 
+                    id="header-safety-limit-badge"
+                    title={isJa 
+                      ? `安全リミット警告: 各品目最大500個の上限により、${safetyLimitTruncatedCount.toLocaleString()}個の貨物が計算から除外されています（登録総数: ${totalRawItemCount.toLocaleString()}個 / 最適化計算対象数: ${totalItemCount.toLocaleString()}個）` 
+                      : `Safety limit: ${safetyLimitTruncatedCount.toLocaleString()} items excluded by max 500 units/item limit (Registered: ${totalRawItemCount.toLocaleString()} / Calculation target: ${totalItemCount.toLocaleString()})`}
+                    className="ml-1.5 text-amber-800 bg-amber-100 border border-amber-300 text-[10px] px-1.5 py-0.2 rounded font-bold cursor-help inline-flex items-center gap-0.5"
+                  >
+                    <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                    <span>{isJa ? `-${safetyLimitTruncatedCount.toLocaleString()}除外` : `-${safetyLimitTruncatedCount.toLocaleString()} capped`}</span>
+                  </span>
+                )}
+              </span>
+              <span className="text-slate-300">|</span>
+              <span>
+                {isJa ? '重量:' : 'Weight:'}{' '}
+                <strong className="text-slate-900 font-mono font-bold">{packedWeightKg.toLocaleString()} kg</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* 2nd Row: Navigation Buttons */}
           <div className="flex items-center gap-1 overflow-x-auto text-[11px] font-semibold custom-scrollbar">
             <button
               id="tab-3d-btn"
               onClick={() => onChangeTab && onChangeTab('3d')}
-              className={`px-2.5 py-1 rounded-md flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all ${
                 activeTab === '3d'
                   ? 'bg-slate-900 text-white shadow-xs font-bold'
                   : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
@@ -335,7 +402,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="tab-cargo-btn"
               onClick={() => onChangeTab && onChangeTab('cargo')}
-              className={`px-2.5 py-1 rounded-md flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all ${
                 activeTab === 'cargo'
                   ? 'bg-slate-900 text-white shadow-xs font-bold'
                   : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
@@ -360,7 +427,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="tab-container-btn"
               onClick={() => onChangeTab && onChangeTab('container')}
-              className={`px-2.5 py-1 rounded-md flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all ${
                 activeTab === 'container'
                   ? 'bg-slate-900 text-white shadow-xs font-bold'
                   : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
@@ -378,7 +445,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="tab-analytics-btn"
               onClick={() => onChangeTab && onChangeTab('analytics')}
-              className={`px-2.5 py-1 rounded-md flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all ${
                 activeTab === 'analytics'
                   ? 'bg-slate-900 text-white shadow-xs font-bold'
                   : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
@@ -396,7 +463,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="tab-manifest-btn"
               onClick={() => onChangeTab && onChangeTab('manifest')}
-              className={`px-2.5 py-1 rounded-md flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition-all ${
                 activeTab === 'manifest'
                   ? 'bg-slate-900 text-white shadow-xs font-bold'
                   : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
@@ -405,37 +472,6 @@ export const Header: React.FC<HeaderProps> = ({
               <ListOrdered className="w-3 h-3" />
               <span>{isJa ? '積載マニフェスト' : 'Loading Manifest'}</span>
             </button>
-          </div>
-
-          {/* Quick Summary Metrics Label on Right */}
-          <div className="flex items-center gap-2 bg-white border border-slate-300 px-2 py-0.5 rounded-md text-slate-600 shadow-2xs text-[11px] flex-wrap">
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />
-              {isJa ? '台数:' : 'Containers:'}{' '}
-              <strong className="text-slate-900 font-mono font-bold">{containerUnitsCount} {isJa ? '台' : 'units'}</strong>
-            </span>
-            <span className="text-slate-300">|</span>
-            <span>
-              {isJa ? '積載:' : 'Packed:'}{' '}
-              <strong className="text-slate-900 font-mono font-bold">{packedItemCount.toLocaleString()} / {totalItemCount.toLocaleString()}</strong>
-              {safetyLimitTruncatedCount > 0 && (
-                <span 
-                  id="header-safety-limit-badge"
-                  title={isJa 
-                    ? `安全リミット警告: 各品目最大500個の上限により、${safetyLimitTruncatedCount.toLocaleString()}個の貨物が計算から除外されています（登録総数: ${totalRawItemCount.toLocaleString()}個 / 最適化計算対象数: ${totalItemCount.toLocaleString()}個）` 
-                    : `Safety limit: ${safetyLimitTruncatedCount.toLocaleString()} items excluded by max 500 units/item limit (Registered: ${totalRawItemCount.toLocaleString()} / Calculation target: ${totalItemCount.toLocaleString()})`}
-                  className="ml-1.5 text-amber-800 bg-amber-100 border border-amber-300 text-[10px] px-1.5 py-0.5 rounded font-bold cursor-help inline-flex items-center gap-0.5"
-                >
-                  <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                  <span>{isJa ? `-${safetyLimitTruncatedCount.toLocaleString()}除外` : `-${safetyLimitTruncatedCount.toLocaleString()} capped`}</span>
-                </span>
-              )}
-            </span>
-            <span className="text-slate-300">|</span>
-            <span>
-              {isJa ? '重量:' : 'Weight:'}{' '}
-              <strong className="text-slate-900 font-mono font-bold">{packedWeightKg.toLocaleString()} kg</strong>
-            </span>
           </div>
         </div>
       </div>

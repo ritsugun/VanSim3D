@@ -298,57 +298,8 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
         </div>
       )}
 
-      {/* Safety Limit Truncation Alert */}
-      {(((overallMetrics?.safetyLimitTruncatedCount ?? 0) > 0) || ((metrics.safetyLimitTruncatedCount ?? 0) > 0)) && (
-        <div id="safety-limit-analytics-alert" className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 text-amber-950 text-xs shadow-xs">
-          <div className="flex items-start gap-2.5">
-            <div className="w-6 h-6 rounded-md bg-amber-500 text-white flex items-center justify-center shrink-0 mt-0.5 font-bold shadow-2xs">
-              <AlertTriangle className="w-3.5 h-3.5" />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-sm text-amber-950">
-                  {isJa 
-                    ? `${(overallMetrics?.safetyLimitTruncatedCount || metrics.safetyLimitTruncatedCount)?.toLocaleString()} 個の貨物が安全リミットにより除外されました` 
-                    : `${(overallMetrics?.safetyLimitTruncatedCount || metrics.safetyLimitTruncatedCount)?.toLocaleString()} items were excluded by the safety limit`}
-                </span>
-                <span className="bg-amber-200/80 text-amber-900 border border-amber-400 text-[10px] font-mono font-bold px-1.5 py-0.2 rounded">
-                  {isJa ? '1品目上限500個' : 'Max 500/item'}
-                </span>
-              </div>
-              <p className="text-[11.5px] text-amber-900 leading-relaxed">
-                {isJa 
-                  ? `ブラウザ保護のため、1品目あたりの数量を最大500個に制限しています。最適化計算の対象数は ${(overallMetrics?.totalItemsCount || metrics.totalItemCount)?.toLocaleString()} 個（登録総数: ${(overallMetrics?.rawTotalItemCount || metrics.rawTotalItemCount)?.toLocaleString()} 個）です。`
-                  : `To ensure stable browser performance, items are capped at 500 units per line. The optimization target is ${(overallMetrics?.totalItemsCount || metrics.totalItemCount)?.toLocaleString()} items (Total registered: ${(overallMetrics?.rawTotalItemCount || metrics.rawTotalItemCount)?.toLocaleString()}).`}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Unplaced Items Warning Alert if any */}
-      {unplacedItems.length > 0 && (
-        <div className="bg-slate-100 border border-slate-300 rounded-xl p-4 text-slate-900 text-xs shadow-xs">
-          <div className="flex items-center gap-2 font-bold text-slate-900 mb-1.5">
-            <AlertTriangle className="w-4 h-4 text-slate-700 shrink-0" />
-            <span>
-              {isJa 
-                ? `積載上限により未積載の貨物が ${metrics.unplacedCount} 個あります` 
-                : `${metrics.unplacedCount} items could not be packed into available containers`}
-            </span>
-          </div>
-          <div className="space-y-1 pl-6 text-[11px] text-slate-700">
-            {unplacedItems.map((u, idx) => (
-              <div key={idx} className="flex items-center justify-between">
-                <span>• {u.name} ({u.sku}) × {u.count} {isJa ? '個' : 'pcs'}</span>
-                <span className="font-mono font-semibold text-slate-900">
-                  {u.reason === 'exceeds_weight' ? (isJa ? '重量制限超過' : 'Exceeds Weight Limit') : (isJa ? '空間不足' : 'Spatial Overflow')}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* Active Container Switcher Bar for Multi-Container Fleets */}
       {hasMultipleContainers && (

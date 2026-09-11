@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { PackedItem, Language, UnitSystem, Container, ContainerLoad, PackingMetrics, OverallPackingMetrics, UnplacedItem } from '../types';
 import { 
-  ClipboardList, Search, Download, Printer, FileText,
-  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box, ArrowDownToLine 
+  ClipboardList, Search, Download, Printer, FileText, FileSpreadsheet, Upload,
+  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box, ArrowDownToLine, Sparkles, RefreshCw
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 import { WarehousePdfExportModal } from './WarehousePdfExportModal';
+import { exportManifestToExcel } from '../utils/manifestParser';
 
 interface LoadingGuideTableProps {
   packedItems: PackedItem[];
@@ -22,6 +23,10 @@ interface LoadingGuideTableProps {
   unplacedItems?: UnplacedItem[];
   algorithmName?: string;
   hasManualAdjustments?: boolean;
+  onOpenImportManifest?: () => void;
+  isManifestReplayActive?: boolean;
+  manifestFileName?: string;
+  onResetToAlgorithm?: () => void;
 }
 
 export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
@@ -38,7 +43,11 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
   overallMetrics,
   unplacedItems = [],
   algorithmName = 'Extreme Points 3D (BFD)',
-  hasManualAdjustments = false
+  hasManualAdjustments = false,
+  onOpenImportManifest,
+  isManifestReplayActive = false,
+  manifestFileName,
+  onResetToAlgorithm
 }) => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedLayer, setSelectedLayer] = useState<string>('all');
@@ -220,12 +229,52 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleExportManifestExcel = () => {
+    exportManifestToExcel(allPackedItems, container);
+  };
+
   const handlePrint = () => {
     window.print();
   };
 
   return (
     <div id="loading-guide-table-root" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-slate-800 flex flex-col">
+      {/* Manifest Replay Mode Ribbon if active */}
+      {isManifestReplayActive && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+              <FileSpreadsheet className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold text-blue-900 text-xs flex items-center gap-1.5">
+                {isJa ? '外部マニフェスト再現モード中' : 'External Manifest Replay Active'}
+                {manifestFileName && (
+                  <span className="font-mono text-[11px] bg-white border border-blue-300 text-blue-800 px-1.5 py-0.5 rounded">
+                    {manifestFileName}
+                  </span>
+                )}
+              </span>
+              <p className="text-[11px] text-blue-700">
+                {isJa 
+                  ? 'ファイルから読み込んだ配置座標(X,Y,Z)と積載段数を忠実に再現しています。' 
+                  : 'Displaying exact 3D coordinates and tier levels loaded from the manifest file.'}
+              </p>
+            </div>
+          </div>
+          {onResetToAlgorithm && (
+            <button
+              type="button"
+              onClick={onResetToAlgorithm}
+              className="px-3 py-1.5 rounded-lg bg-white hover:bg-blue-100 text-blue-700 border border-blue-300 font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>{isJa ? 'AI最適化へ戻す' : 'Reset to AI Optimizer'}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Title & Toolbar */}
       <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100 flex-wrap">
         <div>
@@ -242,6 +291,20 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap text-xs">
+          {/* Manifest Import / Reproduction Trigger */}
+          {onOpenImportManifest && (
+            <button
+              type="button"
+              id="import-manifest-from-guide-btn"
+              onClick={onOpenImportManifest}
+              title={isJa ? 'Loading_Manifestファイル取込 & 3D積載再現' : 'Import Loading Manifest & Reproduce 3D Layout'}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>{isJa ? 'マニフェスト取込(再現)' : 'Import Manifest'}</span>
+            </button>
+          )}
+
           {/* Search Box */}
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -292,6 +355,18 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
           >
             <FileText className="w-3.5 h-3.5" />
             <span>{isJa ? 'PDF作業指示書' : 'Export PDF'}</span>
+          </button>
+
+          {/* Excel Export Button */}
+          <button
+            type="button"
+            id="export-excel-manifest-btn"
+            onClick={handleExportManifestExcel}
+            title={isJa ? 'マニフェストExcel出力 (.xlsx - 再現取込対応)' : 'Export Loading Manifest as Excel'}
+            className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+            <span>{isJa ? 'Excel出力' : 'Excel'}</span>
           </button>
 
           {/* CSV Download Button */}

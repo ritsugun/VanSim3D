@@ -143,6 +143,33 @@ export function checkContainerBounds(
 }
 
 /**
+ * Checks whether the item would rest directly on top of a fragile item
+ */
+export function isRestingOnFragile(
+  x: number,
+  y: number,
+  z: number,
+  length: number,
+  width: number,
+  existingItems: PackedItem[],
+  ignoreItemId?: string
+): boolean {
+  if (z <= 0) return false; // Directly on the container floor is fine
+  for (const item of existingItems) {
+    if (ignoreItemId && item.id === ignoreItemId) continue;
+    if (!item.fragile) continue;
+
+    const overlapX = x < (item.x + item.length) && (x + length) > item.x;
+    const overlapY = y < (item.y + item.width) && (y + width) > item.y;
+    // If horizontally overlapping and height matches top surface of fragile item
+    if (overlapX && overlapY && Math.abs(z - (item.z + item.height)) < 15) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Applies a manual placement of an unplaced item into the PackingResult
  */
 export function applyManualItemPlacement(
@@ -152,8 +179,22 @@ export function applyManualItemPlacement(
   unplacedItem: UnplacedItem,
   placement: { x: number; y: number; z: number; length: number; width: number; height: number; rotationIndex?: number; color?: string }
 ): PackingResult {
+  // Guard: Verify that the item exists in unplacedItems with count > 0
+  const availableUnplaced = currentResult.unplacedItems.find(
+    u => (u.cargoItemId && u.cargoItemId === unplacedItem.cargoItemId) || (u.sku && u.sku === unplacedItem.sku)
+  );
+  if (!availableUnplaced || availableUnplaced.count <= 0) {
+    // Inventory exhausted: do not allow placement
+    return currentResult;
+  }
+
+  // Preserve fragile attribute from matching items if available
+  const matchingItem = currentResult.packedItems.find(
+    p => (p.sku && p.sku === unplacedItem.sku) || (p.cargoItemId && p.cargoItemId === unplacedItem.cargoItemId)
+  );
+  const isFragile = matchingItem?.fragile ?? (unplacedItem as any).fragile ?? false;
+
   // 1. Create new PackedItem
-  const currentItems = currentResult.containers?.[targetContainerIndex]?.packedItems ?? currentResult.packedItems;
   const nextSeq = (currentResult.packedItems.length || 0) + 1;
 
   const newPackedItem: PackedItem = {
@@ -168,8 +209,8 @@ export function applyManualItemPlacement(
     width: placement.width,
     height: placement.height,
     weight: unplacedItem.weight,
-    color: placement.color || '#3b82f6',
-    fragile: false,
+    color: placement.color || (matchingItem?.color || '#3b82f6'),
+    fragile: isFragile,
     sequenceNumber: nextSeq,
     stepIndex: nextSeq,
     rotationIndex: placement.rotationIndex ?? 0,
@@ -178,12 +219,12 @@ export function applyManualItemPlacement(
     isManual: true
   };
 
-  // 2. Decrement unplaced items
+  // 2. Decrement unplaced items immutably
   const updatedUnplacedItems: UnplacedItem[] = [];
   let decremented = false;
 
   for (const u of currentResult.unplacedItems) {
-    if (!decremented && (u.cargoItemId === unplacedItem.cargoItemId || u.sku === unplacedItem.sku)) {
+    if (!decremented && ((u.cargoItemId && u.cargoItemId === unplacedItem.cargoItemId) || (u.sku && u.sku === unplacedItem.sku))) {
       if (u.count > 1) {
         updatedUnplacedItems.push({
           ...u,
@@ -200,6 +241,7 @@ export function applyManualItemPlacement(
 
   // 3. Update container packed items
   const updatedAllPackedItems = [...currentResult.packedItems, newPackedItem];
+  const totalItemCount = updatedAllPackedItems.length + totalUnplacedCount;
 
   let updatedContainers: ContainerLoad[] = [];
   if (currentResult.containers && currentResult.containers.length > 0) {
@@ -209,7 +251,7 @@ export function applyManualItemPlacement(
         const newContMetrics = recalculateContainerMetrics(
           cLoad.container,
           newContPacked,
-          newContPacked.length + totalUnplacedCount,
+          totalItemCount,
           totalUnplacedCount,
           cLoad.metrics.algorithm
         );
@@ -226,7 +268,7 @@ export function applyManualItemPlacement(
     const newMetrics = recalculateContainerMetrics(
       targetContainer,
       updatedAllPackedItems,
-      updatedAllPackedItems.length + totalUnplacedCount,
+      totalItemCount,
       totalUnplacedCount,
       currentResult.metrics.algorithm
     );
@@ -240,17 +282,17 @@ export function applyManualItemPlacement(
 
   const activeContainerMetrics = updatedContainers.find(c => c.containerIndex === targetContainerIndex)?.metrics
     || updatedContainers[targetContainerIndex - 1]?.metrics
+    || updatedContainers[0]?.metrics
     || recalculateContainerMetrics(
       targetContainer,
       updatedAllPackedItems,
-      updatedAllPackedItems.length + totalUnplacedCount,
+      totalItemCount,
       totalUnplacedCount,
       currentResult.metrics.algorithm
     );
 
   // 4. Update overall metrics
   const totalPackedCount = updatedAllPackedItems.length;
-  const totalItemCount = totalPackedCount + totalUnplacedCount;
   const totalPackedVol = updatedAllPackedItems.reduce((s, p) => s + (p.length * p.width * p.height) / 1_000_000_000, 0);
   const totalPackedWeight = updatedAllPackedItems.reduce((s, p) => s + p.weight, 0);
 
@@ -293,6 +335,11 @@ export function applyManualItemMove(
   itemId: string,
   newCoords: { x: number; y: number; z: number; rotationIndex?: number; length?: number; width?: number; height?: number }
 ): PackingResult {
+  const existingItem = currentResult.packedItems.find(p => p.id === itemId);
+  if (!existingItem) return currentResult;
+
+  const targetContainerIndex = existingItem.containerIndex || 1;
+
   const updatedAllPackedItems = currentResult.packedItems.map(item => {
     if (item.id === itemId) {
       return {
@@ -304,6 +351,7 @@ export function applyManualItemMove(
         width: newCoords.width ?? item.width,
         height: newCoords.height ?? item.height,
         rotationIndex: newCoords.rotationIndex ?? item.rotationIndex,
+        layer: Math.floor(newCoords.z / Math.max(100, newCoords.height ?? item.height)) + 1,
         isManual: true
       };
     }
@@ -311,6 +359,7 @@ export function applyManualItemMove(
   });
 
   const totalUnplacedCount = currentResult.unplacedItems.reduce((s, u) => s + u.count, 0);
+  const totalItemCount = updatedAllPackedItems.length + totalUnplacedCount;
 
   let updatedContainers: ContainerLoad[] = [];
   if (currentResult.containers && currentResult.containers.length > 0) {
@@ -326,6 +375,7 @@ export function applyManualItemMove(
             width: newCoords.width ?? item.width,
             height: newCoords.height ?? item.height,
             rotationIndex: newCoords.rotationIndex ?? item.rotationIndex,
+            layer: Math.floor(newCoords.z / Math.max(100, newCoords.height ?? item.height)) + 1,
             isManual: true
           };
         }
@@ -334,7 +384,7 @@ export function applyManualItemMove(
       const newContMetrics = recalculateContainerMetrics(
         cLoad.container,
         newContPacked,
-        newContPacked.length + totalUnplacedCount,
+        totalItemCount,
         totalUnplacedCount,
         cLoad.metrics.algorithm
       );
@@ -346,22 +396,46 @@ export function applyManualItemMove(
     });
   }
 
-  const activeIdx = 0;
-  const activeMetrics = updatedContainers[activeIdx]?.metrics || recalculateContainerMetrics(
-    targetContainer,
-    updatedAllPackedItems,
-    updatedAllPackedItems.length + totalUnplacedCount,
-    totalUnplacedCount,
-    currentResult.metrics.algorithm
-  );
+  const activeMetrics = updatedContainers.find(c => c.containerIndex === targetContainerIndex)?.metrics
+    || updatedContainers[0]?.metrics
+    || recalculateContainerMetrics(
+      targetContainer,
+      updatedAllPackedItems,
+      totalItemCount,
+      totalUnplacedCount,
+      currentResult.metrics.algorithm
+    );
+
+  const prevManualCount = currentResult.manualAdjustmentsCount || 0;
+
+  // Update overall metrics if present (center of gravity or axle distribution may have shifted)
+  let updatedOverallMetrics: OverallPackingMetrics | undefined;
+  if (currentResult.overallMetrics) {
+    const totalPackedCount = updatedAllPackedItems.length;
+    const totalPackedVol = updatedAllPackedItems.reduce((s, p) => s + (p.length * p.width * p.height) / 1_000_000_000, 0);
+    const totalPackedWeight = updatedAllPackedItems.reduce((s, p) => s + p.weight, 0);
+    const totalCapVol = currentResult.overallMetrics.totalCapacityVolumeCbm;
+    const totalCapWeight = currentResult.overallMetrics.totalCapacityWeightKg;
+    updatedOverallMetrics = {
+      ...currentResult.overallMetrics,
+      totalPackedCount,
+      totalUnplacedCount,
+      totalPackedVolumeCbm: totalPackedVol,
+      totalPackedWeightKg: totalPackedWeight,
+      overallVolumeUtilization: totalCapVol > 0 ? (totalPackedVol / totalCapVol) * 100 : 0,
+      overallWeightUtilization: totalCapWeight > 0 ? (totalPackedWeight / totalCapWeight) * 100 : 0,
+      totalItemCount
+    };
+  }
 
   return {
     ...currentResult,
     packedItems: updatedAllPackedItems,
     containers: updatedContainers.length > 0 ? updatedContainers : currentResult.containers,
     metrics: activeMetrics,
+    overallMetrics: updatedOverallMetrics,
     hasManualAdjustments: true,
-    manualAdjustmentsCount: (currentResult.manualAdjustmentsCount || 0) + 1
+    manualAdjustmentsCount: prevManualCount + 1
   };
 }
 
@@ -376,15 +450,20 @@ export function applyManualItemRemove(
   const itemToRemove = currentResult.packedItems.find(p => p.id === itemId);
   if (!itemToRemove) return currentResult;
 
+  const targetContainerIndex = itemToRemove.containerIndex || 1;
   const updatedAllPackedItems = currentResult.packedItems.filter(p => p.id !== itemId);
 
-  // Return to unplaced items
-  const updatedUnplacedItems = [...currentResult.unplacedItems];
-  const existingUnplaced = updatedUnplacedItems.find(u => u.sku === itemToRemove.sku || u.cargoItemId === itemToRemove.cargoItemId);
+  // Return to unplaced items immutably
+  let found = false;
+  const updatedUnplacedItems = currentResult.unplacedItems.map(u => {
+    if (!found && ((u.cargoItemId && u.cargoItemId === itemToRemove.cargoItemId) || (u.sku && u.sku === itemToRemove.sku))) {
+      found = true;
+      return { ...u, count: u.count + 1 };
+    }
+    return u;
+  });
 
-  if (existingUnplaced) {
-    existingUnplaced.count += 1;
-  } else {
+  if (!found) {
     updatedUnplacedItems.push({
       cargoItemId: itemToRemove.cargoItemId,
       sku: itemToRemove.sku,
@@ -401,6 +480,7 @@ export function applyManualItemRemove(
   }
 
   const totalUnplacedCount = updatedUnplacedItems.reduce((s, u) => s + u.count, 0);
+  const totalItemCount = updatedAllPackedItems.length + totalUnplacedCount;
 
   let updatedContainers: ContainerLoad[] = [];
   if (currentResult.containers && currentResult.containers.length > 0) {
@@ -409,7 +489,7 @@ export function applyManualItemRemove(
       const newContMetrics = recalculateContainerMetrics(
         cLoad.container,
         newContPacked,
-        newContPacked.length + totalUnplacedCount,
+        totalItemCount,
         totalUnplacedCount,
         cLoad.metrics.algorithm
       );
@@ -421,14 +501,35 @@ export function applyManualItemRemove(
     });
   }
 
-  const activeIdx = 0;
-  const activeMetrics = updatedContainers[activeIdx]?.metrics || recalculateContainerMetrics(
-    targetContainer,
-    updatedAllPackedItems,
-    updatedAllPackedItems.length + totalUnplacedCount,
-    totalUnplacedCount,
-    currentResult.metrics.algorithm
-  );
+  const activeMetrics = updatedContainers.find(c => c.containerIndex === targetContainerIndex)?.metrics
+    || updatedContainers[0]?.metrics
+    || recalculateContainerMetrics(
+      targetContainer,
+      updatedAllPackedItems,
+      totalItemCount,
+      totalUnplacedCount,
+      currentResult.metrics.algorithm
+    );
+
+  // Update overall metrics
+  let updatedOverallMetrics: OverallPackingMetrics | undefined;
+  if (currentResult.overallMetrics) {
+    const totalPackedCount = updatedAllPackedItems.length;
+    const totalPackedVol = updatedAllPackedItems.reduce((s, p) => s + (p.length * p.width * p.height) / 1_000_000_000, 0);
+    const totalPackedWeight = updatedAllPackedItems.reduce((s, p) => s + p.weight, 0);
+    const totalCapVol = currentResult.overallMetrics.totalCapacityVolumeCbm;
+    const totalCapWeight = currentResult.overallMetrics.totalCapacityWeightKg;
+    updatedOverallMetrics = {
+      ...currentResult.overallMetrics,
+      totalPackedCount,
+      totalUnplacedCount,
+      totalPackedVolumeCbm: totalPackedVol,
+      totalPackedWeightKg: totalPackedWeight,
+      overallVolumeUtilization: totalCapVol > 0 ? (totalPackedVol / totalCapVol) * 100 : 0,
+      overallWeightUtilization: totalCapWeight > 0 ? (totalPackedWeight / totalCapWeight) * 100 : 0,
+      totalItemCount
+    };
+  }
 
   return {
     ...currentResult,
@@ -436,7 +537,143 @@ export function applyManualItemRemove(
     containers: updatedContainers.length > 0 ? updatedContainers : currentResult.containers,
     unplacedItems: updatedUnplacedItems,
     metrics: activeMetrics,
+    overallMetrics: updatedOverallMetrics,
     hasManualAdjustments: true,
     manualAdjustmentsCount: Math.max(0, (currentResult.manualAdjustmentsCount || 1) - 1)
   };
 }
+
+/**
+ * Unloads all packed items from the current container (or all containers)
+ * and returns them to the unplaced items tray for full manual packing.
+ */
+export function applyManualUnloadContainer(
+  currentResult: PackingResult,
+  targetContainer: Container,
+  targetContainerIndex?: number | 'all'
+): PackingResult {
+  // Determine which items to unload
+  const itemsToUnload = currentResult.packedItems.filter(p => {
+    if (targetContainerIndex === undefined || targetContainerIndex === 'all') {
+      return true;
+    }
+    const cIdx = p.containerIndex || 1;
+    return cIdx === targetContainerIndex;
+  });
+
+  if (itemsToUnload.length === 0) {
+    return currentResult;
+  }
+
+  // Remaining items that stay packed
+  const updatedAllPackedItems = currentResult.packedItems.filter(p => {
+    if (targetContainerIndex === undefined || targetContainerIndex === 'all') {
+      return false;
+    }
+    const cIdx = p.containerIndex || 1;
+    return cIdx !== targetContainerIndex;
+  });
+
+  // Return unloaded items to unplaced list
+  const updatedUnplacedItems = currentResult.unplacedItems.map(u => ({ ...u }));
+
+  for (const item of itemsToUnload) {
+    const existing = updatedUnplacedItems.find(u => 
+      (u.cargoItemId && u.cargoItemId === item.cargoItemId) || 
+      (u.sku && u.sku === item.sku)
+    );
+
+    if (existing) {
+      existing.count += 1;
+    } else {
+      updatedUnplacedItems.push({
+        cargoItemId: item.cargoItemId,
+        sku: item.sku,
+        name: item.name,
+        reason: 'no_spatial_fit',
+        dimensions: {
+          length: item.length,
+          width: item.width,
+          height: item.height
+        },
+        weight: item.weight,
+        count: 1
+      });
+    }
+  }
+
+  const totalUnplacedCount = updatedUnplacedItems.reduce((s, u) => s + u.count, 0);
+  const totalItemCount = updatedAllPackedItems.length + totalUnplacedCount;
+
+  // Update containers array
+  let updatedContainers: ContainerLoad[] = [];
+  if (currentResult.containers && currentResult.containers.length > 0) {
+    updatedContainers = currentResult.containers.map(cLoad => {
+      const isThisContainerUnloaded = 
+        targetContainerIndex === undefined || 
+        targetContainerIndex === 'all' || 
+        cLoad.containerIndex === targetContainerIndex;
+
+      const newContPacked = isThisContainerUnloaded
+        ? []
+        : cLoad.packedItems;
+
+      const newContMetrics = recalculateContainerMetrics(
+        cLoad.container,
+        newContPacked,
+        totalItemCount,
+        totalUnplacedCount,
+        cLoad.metrics.algorithm
+      );
+
+      return {
+        ...cLoad,
+        packedItems: newContPacked,
+        metrics: newContMetrics
+      };
+    });
+  }
+
+  const activeIdx = typeof targetContainerIndex === 'number' ? targetContainerIndex : 1;
+  const activeMetrics = updatedContainers.find(c => c.containerIndex === activeIdx)?.metrics
+    || updatedContainers[0]?.metrics
+    || recalculateContainerMetrics(
+      targetContainer,
+      updatedAllPackedItems,
+      totalItemCount,
+      totalUnplacedCount,
+      currentResult.metrics.algorithm
+    );
+
+  // Update overall metrics
+  let updatedOverallMetrics: OverallPackingMetrics | undefined;
+  if (currentResult.overallMetrics) {
+    const totalPackedCount = updatedAllPackedItems.length;
+    const totalPackedVol = updatedAllPackedItems.reduce((s, p) => s + (p.length * p.width * p.height) / 1_000_000_000, 0);
+    const totalPackedWeight = updatedAllPackedItems.reduce((s, p) => s + p.weight, 0);
+    const totalCapVol = currentResult.overallMetrics.totalCapacityVolumeCbm;
+    const totalCapWeight = currentResult.overallMetrics.totalCapacityWeightKg;
+    updatedOverallMetrics = {
+      ...currentResult.overallMetrics,
+      totalPackedCount,
+      totalUnplacedCount,
+      totalPackedVolumeCbm: totalPackedVol,
+      totalPackedWeightKg: totalPackedWeight,
+      overallVolumeUtilization: totalCapVol > 0 ? (totalPackedVol / totalCapVol) * 100 : 0,
+      overallWeightUtilization: totalCapWeight > 0 ? (totalPackedWeight / totalCapWeight) * 100 : 0,
+      totalItemCount
+    };
+  }
+
+  return {
+    ...currentResult,
+    packedItems: updatedAllPackedItems,
+    containers: updatedContainers.length > 0 ? updatedContainers : currentResult.containers,
+    unplacedItems: updatedUnplacedItems,
+    metrics: activeMetrics,
+    overallMetrics: updatedOverallMetrics,
+    hasManualAdjustments: true,
+    manualAdjustmentsCount: (currentResult.manualAdjustmentsCount || 0) + 1
+  };
+}
+
