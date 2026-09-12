@@ -170,6 +170,113 @@ export function isRestingOnFragile(
 }
 
 /**
+ * Checks whether an item at (x, y, z) with dimensions (length, width, height)
+ * collides (overlaps in 3D volume) with any existing packed item in the container.
+ * Note: Surfaces touching (e.g. adjacent faces or resting on top) is allowed.
+ */
+export function check3DItemCollision(
+  x: number,
+  y: number,
+  z: number,
+  length: number,
+  width: number,
+  height: number,
+  existingItems: PackedItem[],
+  ignoreItemId?: string,
+  toleranceMm: number = 0.5
+): { hasCollision: boolean; collidingItem?: PackedItem } {
+  for (const item of existingItems) {
+    if (ignoreItemId && item.id === ignoreItemId) continue;
+
+    // Check strict 3D AABB overlap with small tolerance to allow flush surface contact
+    const overlapX = (x < item.x + item.length - toleranceMm) && (x + length > item.x + toleranceMm);
+    const overlapY = (y < item.y + item.width - toleranceMm) && (y + width > item.y + toleranceMm);
+    const overlapZ = (z < item.z + item.height - toleranceMm) && (z + height > item.z + toleranceMm);
+
+    if (overlapX && overlapY && overlapZ) {
+      return { hasCollision: true, collidingItem: item };
+    }
+  }
+
+  return { hasCollision: false };
+}
+
+/**
+ * Finds the maximum non-colliding position when nudging along an axis.
+ * Returns the furthest valid coordinate without overlapping any other items or container walls.
+ */
+export function findMaxNonCollidingPosition(
+  current: { x: number; y: number; z: number; length: number; width: number; height: number },
+  target: { x: number; y: number; z: number },
+  existingItems: PackedItem[],
+  container: Container,
+  ignoreItemId?: string
+): { x: number; y: number; z: number; blocked: boolean; collidingItem?: PackedItem } {
+  // Check container bounds
+  const clampedTargetX = Math.max(0, Math.min(container.length - current.length, target.x));
+  const clampedTargetY = Math.max(0, Math.min(container.width - current.width, target.y));
+  const clampedTargetZ = Math.max(0, Math.min(container.height - current.height, target.z));
+
+  // If no collision at clamped target, return immediately
+  const initialCollision = check3DItemCollision(
+    clampedTargetX, clampedTargetY, clampedTargetZ,
+    current.length, current.width, current.height,
+    existingItems, ignoreItemId
+  );
+
+  if (!initialCollision.hasCollision) {
+    return {
+      x: clampedTargetX,
+      y: clampedTargetY,
+      z: clampedTargetZ,
+      blocked: false
+    };
+  }
+
+  // If initial target collides, check if moving along individual axes or finding contact point
+  // We check binary search or stepped resolution to find the flush contact position
+  const dx = clampedTargetX - current.x;
+  const dy = clampedTargetY - current.y;
+  const dz = clampedTargetZ - current.z;
+
+  let bestX = current.x;
+  let bestY = current.y;
+  let bestZ = current.z;
+  let blocked = true;
+
+  // Try sub-stepping (up to 10 steps) towards the target to stop flush against the obstacle
+  const steps = 10;
+  for (let step = 1; step <= steps; step++) {
+    const testX = Math.round(current.x + (dx * step) / steps);
+    const testY = Math.round(current.y + (dy * step) / steps);
+    const testZ = Math.round(current.z + (dz * step) / steps);
+
+    const collision = check3DItemCollision(
+      testX, testY, testZ,
+      current.length, current.width, current.height,
+      existingItems, ignoreItemId
+    );
+
+    if (!collision.hasCollision) {
+      bestX = testX;
+      bestY = testY;
+      bestZ = testZ;
+      blocked = false;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    x: bestX,
+    y: bestY,
+    z: bestZ,
+    blocked: blocked || (bestX === current.x && bestY === current.y && bestZ === current.z),
+    collidingItem: initialCollision.collidingItem
+  };
+}
+
+/**
  * Applies a manual placement of an unplaced item into the PackingResult
  */
 export function applyManualItemPlacement(

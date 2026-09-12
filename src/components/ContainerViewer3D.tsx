@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 import { VIVID_NEON_PALETTE, boostHexToVivid } from '../utils/colors';
-import { calculateSupportHeight, checkContainerBounds, isRestingOnFragile } from '../utils/manualAdjustment';
+import { calculateSupportHeight, checkContainerBounds, isRestingOnFragile, check3DItemCollision, findMaxNonCollidingPosition } from '../utils/manualAdjustment';
 
 interface ContainerViewer3DProps {
   container: Container;
@@ -125,6 +125,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
   const [confirmingUnload, setConfirmingUnload] = useState<boolean>(false);
   const confirmTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Key hold acceleration tracking for manual mode arrow navigation
+  const [activeSpeedMultiplier, setActiveSpeedMultiplier] = useState<number>(1);
+  const keyHoldTrackerRef = useRef<{
+    key: string | null;
+    startTime: number;
+    count: number;
+    resetTimeout: any;
+  }>({ key: null, startTime: 0, count: 0, resetTimeout: null });
+  const lastBlockToastTimeRef = useRef<number>(0);
 
   useEffect(() => {
     return () => {
@@ -435,6 +445,88 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       ? `「${item.name}」を直下（Z: ${targetZ}mm）へ着地させました` 
       : `Dropped "${item.name}" to Z: ${targetZ}mm`);
   }, [activeSelectedItem, onManualMoveItem, containers, currentTab, packedItems, isJa, showToast, onSelectItem]);
+
+  // Safely nudge an item along an axis without penetrating walls or other packed items
+  const handleNudgeItem = useCallback((
+    targetItem: PackedItem,
+    delta: { dx?: number; dy?: number; dz?: number }
+  ) => {
+    if (!onManualMoveItem) return;
+
+    const dx = delta.dx || 0;
+    const dy = delta.dy || 0;
+    const dz = delta.dz || 0;
+
+    const targetContNum = targetItem.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1);
+    const activeContLoad = (containers && containers.length > 0)
+      ? (containers.find(c => c.containerIndex === targetContNum) || containers[0])
+      : null;
+    const contItems = activeContLoad ? activeContLoad.packedItems : packedItems;
+
+    const nonColliding = findMaxNonCollidingPosition(
+      {
+        x: targetItem.x,
+        y: targetItem.y,
+        z: targetItem.z,
+        length: targetItem.length,
+        width: targetItem.width,
+        height: targetItem.height
+      },
+      {
+        x: targetItem.x + dx,
+        y: targetItem.y + dy,
+        z: targetItem.z + dz
+      },
+      contItems,
+      container,
+      targetItem.id
+    );
+
+    if (nonColliding.x !== targetItem.x || nonColliding.y !== targetItem.y || nonColliding.z !== targetItem.z) {
+      const updated = {
+        ...targetItem,
+        x: nonColliding.x,
+        y: nonColliding.y,
+        z: nonColliding.z
+      };
+      activeSelectedItemRef.current = updated;
+      onManualMoveItem(targetItem.id, {
+        x: nonColliding.x,
+        y: nonColliding.y,
+        z: nonColliding.z
+      });
+      if (onSelectItem) {
+        onSelectItem(updated);
+      }
+      const now = Date.now();
+      const canToast = now - lastBlockToastTimeRef.current > 1200;
+
+      if (nonColliding.blocked && nonColliding.collidingItem) {
+        if (canToast) {
+          lastBlockToastTimeRef.current = now;
+          showToast(isJa
+            ? `「${nonColliding.collidingItem.name}」と接触するためこれ以上移動できません`
+            : `Blocked by "${nonColliding.collidingItem.name}"`);
+        }
+      }
+    } else if (nonColliding.blocked && nonColliding.collidingItem) {
+      const now = Date.now();
+      if (now - lastBlockToastTimeRef.current > 1200) {
+        lastBlockToastTimeRef.current = now;
+        showToast(isJa
+          ? `「${nonColliding.collidingItem.name}」と接触するため移動できません`
+          : `Movement blocked by "${nonColliding.collidingItem.name}"`);
+      }
+    } else if (nonColliding.blocked) {
+      const now = Date.now();
+      if (now - lastBlockToastTimeRef.current > 1200) {
+        lastBlockToastTimeRef.current = now;
+        showToast(isJa
+          ? `コンテナの端に到達したためこれ以上移動できません`
+          : `Reached container boundary`);
+      }
+    }
+  }, [onManualMoveItem, containers, currentTab, packedItems, container, onSelectItem, isJa, showToast]);
 
   // Unload all cargo items in the active container (or all containers) to unplaced tray
   const handleUnloadContainerAll = useCallback(() => {
@@ -1134,6 +1226,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
       const bounds = checkContainerBounds(rawX, rawY, rawZ, length, width, height, container);
       const restingOnFragile = isRestingOnFragile(rawX, rawY, rawZ, length, width, contItems, ignoreId);
+      const collisionCheck = check3DItemCollision(rawX, rawY, rawZ, length, width, height, contItems, ignoreId);
 
       // Check container payload capacity if maxWeight is defined
       const itemWeight = heldUnplacedItem?.unplaced.weight ?? isDraggingExistingItem?.weight ?? 0;
@@ -1147,13 +1240,17 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         } else {
           invalidReason = language === 'ja' ? 'コンテナの境界寸法を超過しています' : 'Exceeds container boundary dimensions';
         }
+      } else if (collisionCheck.hasCollision) {
+        invalidReason = language === 'ja' 
+          ? `「${collisionCheck.collidingItem?.name || '他の貨物'}」と干渉するため配置できません` 
+          : `Collides with "${collisionCheck.collidingItem?.name || 'existing cargo'}"`;
       } else if (restingOnFragile) {
         invalidReason = language === 'ja' ? '割れ物（Fragile）指定の荷物の上には積載できません' : 'Cannot stack on top of fragile cargo';
       } else if (exceedsWeight) {
         invalidReason = language === 'ja' ? 'コンテナの最大積載重量を超過します' : 'Exceeds container max weight limit';
       }
 
-      const isValid = bounds.isValid && !restingOnFragile && !exceedsWeight;
+      const isValid = bounds.isValid && !restingOnFragile && !exceedsWeight && !collisionCheck.hasCollision;
 
       return {
         x: rawX,
@@ -1483,47 +1580,73 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       ) {
         // Arrow Keys & PageUp/PageDown Nudge fine adjustment
         e.preventDefault();
-        const baseStep = gridSnapMm > 0 ? gridSnapMm : 50;
+
+        const now = Date.now();
+        const tracker = keyHoldTrackerRef.current;
+        if (tracker.key !== e.key) {
+          tracker.key = e.key;
+          tracker.startTime = now;
+          tracker.count = 1;
+        } else {
+          tracker.count += 1;
+        }
+
+        if (tracker.resetTimeout) {
+          clearTimeout(tracker.resetTimeout);
+        }
+        tracker.resetTimeout = setTimeout(() => {
+          tracker.key = null;
+          tracker.startTime = 0;
+          tracker.count = 0;
+          setActiveSpeedMultiplier(1);
+        }, 300);
+
+        const holdDuration = now - tracker.startTime;
+        const count = tracker.count;
+
+        // 加速度倍率の計算 (キーを押し続けると段階的に加速)
+        let speedMultiplier = 1.0;
+        if (e.repeat || count > 1 || holdDuration > 180) {
+          if (holdDuration > 1600 || count >= 20) {
+            speedMultiplier = 6.0;
+          } else if (holdDuration > 1000 || count >= 12) {
+            speedMultiplier = 4.0;
+          } else if (holdDuration > 500 || count >= 6) {
+            speedMultiplier = 2.5;
+          } else {
+            speedMultiplier = 1.5;
+          }
+        }
+
+        // Shiftキーが併用されている場合はさらに高速ブースト
+        if (e.shiftKey && !e.key.startsWith('Page')) {
+          speedMultiplier = Math.min(8.0, speedMultiplier * 2.0);
+        }
+
+        setActiveSpeedMultiplier(speedMultiplier);
+
+        const baseUnit = gridSnapMm > 0 ? gridSnapMm : 50;
+        const effectiveStep = Math.max(10, Math.round(baseUnit * speedMultiplier));
 
         let dx = 0;
         let dy = 0;
         let dz = 0;
 
         if (e.key === 'PageUp' || (e.shiftKey && e.key === 'ArrowUp')) {
-          dz = baseStep; // Elevation Up
+          dz = effectiveStep; // Elevation Up
         } else if (e.key === 'PageDown' || (e.shiftKey && e.key === 'ArrowDown')) {
-          dz = -baseStep; // Elevation Down
+          dz = -effectiveStep; // Elevation Down
         } else if (e.key === 'ArrowUp') {
-          dx = -baseStep; // Inward (towards front/depth of container)
+          dx = -effectiveStep; // Inward (towards front/depth of container)
         } else if (e.key === 'ArrowDown') {
-          dx = baseStep; // Outward (towards container doors)
+          dx = effectiveStep; // Outward (towards container doors)
         } else if (e.key === 'ArrowLeft') {
-          dy = -baseStep; // Move Left
+          dy = effectiveStep; // Move Left in default perspective (+Y direction in container coordinates)
         } else if (e.key === 'ArrowRight') {
-          dy = baseStep; // Move Right
+          dy = -effectiveStep; // Move Right in default perspective (-Y direction in container coordinates)
         }
 
-        const maxX = Math.max(0, container.length - currentSelected.length);
-        const maxY = Math.max(0, container.width - currentSelected.width);
-        const maxZ = Math.max(0, container.height - currentSelected.height);
-
-        const newX = Math.max(0, Math.min(maxX, currentSelected.x + dx));
-        const newY = Math.max(0, Math.min(maxY, currentSelected.y + dy));
-        const newZ = Math.max(0, Math.min(maxZ, currentSelected.z + dz));
-
-        if (newX !== currentSelected.x || newY !== currentSelected.y || newZ !== currentSelected.z) {
-          const updatedItem = {
-            ...currentSelected,
-            x: newX,
-            y: newY,
-            z: newZ
-          };
-          activeSelectedItemRef.current = updatedItem;
-          onManualMoveItem(currentSelected.id, { x: newX, y: newY, z: newZ });
-          if (onSelectItem) {
-            onSelectItem(updatedItem);
-          }
-        }
+        handleNudgeItem(currentSelected, { dx, dy, dz });
       } else if (e.key === 'Escape') {
         setHeldUnplacedItem(null);
         setIsDraggingExistingItem(null);
@@ -1542,12 +1665,27 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       }
     };
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'].includes(e.key)) {
+        if (keyHoldTrackerRef.current.key === e.key) {
+          if (keyHoldTrackerRef.current.resetTimeout) {
+            clearTimeout(keyHoldTrackerRef.current.resetTimeout);
+          }
+          keyHoldTrackerRef.current.key = null;
+          keyHoldTrackerRef.current.startTime = 0;
+          keyHoldTrackerRef.current.count = 0;
+          setActiveSpeedMultiplier(1);
+        }
+      }
+    };
+
     containerEl.addEventListener('mousedown', handleMouseDown);
     containerEl.addEventListener('mousemove', handleMouseMove);
     containerEl.addEventListener('click', handleClick);
     containerEl.addEventListener('dragover', handleDragOver);
     containerEl.addEventListener('drop', handleDrop);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
 
     return () => {
       containerEl.removeEventListener('mousedown', handleMouseDown);
@@ -1556,6 +1694,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       containerEl.removeEventListener('dragover', handleDragOver);
       containerEl.removeEventListener('drop', handleDrop);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
     };
   }, [
     isManualMode, heldUnplacedItem, isDraggingExistingItem, currentTab, containers, 
@@ -2051,9 +2190,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                         <Move className="w-3 h-3 text-amber-600" />
                         {isJa ? '位置微調整' : 'Nudge Position'}
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        ±{gridSnapMm || 50}mm
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {activeSpeedMultiplier > 1 && (
+                          <span className="text-[10px] font-bold text-amber-800 bg-amber-200/90 px-1.5 py-0.5 rounded animate-pulse flex items-center gap-0.5">
+                            ⚡ {activeSpeedMultiplier}x {isJa ? '高速' : 'Fast'}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          ±{Math.round((gridSnapMm || 50) * activeSpeedMultiplier)}mm
+                        </span>
+                      </div>
                     </div>
 
                     {/* Coordinate Nudge Controls */}
@@ -2064,29 +2210,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                         <div className="flex items-center gap-0.5">
                           <button
                             type="button"
+                            title={isJa ? 'X奥へ微調整' : 'Nudge -X'}
                             onClick={() => {
-                              if (onManualMoveItem) {
-                                const step = gridSnapMm || 50;
-                                const newX = Math.max(0, target.x - step);
-                                const updated = { ...target, x: newX };
-                                activeSelectedItemRef.current = updated;
-                                onManualMoveItem(target.id, { x: newX, y: target.y, z: target.z });
-                                if (onSelectItem) onSelectItem(updated);
-                              }
+                              const step = gridSnapMm || 50;
+                              handleNudgeItem(target, { dx: -step });
                             }}
                             className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >-</button>
                           <button
                             type="button"
+                            title={isJa ? 'X手前へ微調整' : 'Nudge +X'}
                             onClick={() => {
-                              if (onManualMoveItem) {
-                                const step = gridSnapMm || 50;
-                                const newX = Math.min(container.length - target.length, target.x + step);
-                                const updated = { ...target, x: newX };
-                                activeSelectedItemRef.current = updated;
-                                onManualMoveItem(target.id, { x: newX, y: target.y, z: target.z });
-                                if (onSelectItem) onSelectItem(updated);
-                              }
+                              const step = gridSnapMm || 50;
+                              handleNudgeItem(target, { dx: step });
                             }}
                             className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >+</button>
@@ -2099,29 +2235,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                         <div className="flex items-center gap-0.5">
                           <button
                             type="button"
+                            title={isJa ? 'Y微調整 (-)' : 'Nudge -Y'}
                             onClick={() => {
-                              if (onManualMoveItem) {
-                                const step = gridSnapMm || 50;
-                                const newY = Math.max(0, target.y - step);
-                                const updated = { ...target, y: newY };
-                                activeSelectedItemRef.current = updated;
-                                onManualMoveItem(target.id, { x: target.x, y: newY, z: target.z });
-                                if (onSelectItem) onSelectItem(updated);
-                              }
+                              const step = gridSnapMm || 50;
+                              handleNudgeItem(target, { dy: -step });
                             }}
                             className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >-</button>
                           <button
                             type="button"
+                            title={isJa ? 'Y微調整 (+)' : 'Nudge +Y'}
                             onClick={() => {
-                              if (onManualMoveItem) {
-                                const step = gridSnapMm || 50;
-                                const newY = Math.min(container.width - target.width, target.y + step);
-                                const updated = { ...target, y: newY };
-                                activeSelectedItemRef.current = updated;
-                                onManualMoveItem(target.id, { x: target.x, y: newY, z: target.z });
-                                if (onSelectItem) onSelectItem(updated);
-                              }
+                              const step = gridSnapMm || 50;
+                              handleNudgeItem(target, { dy: step });
                             }}
                             className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >+</button>
@@ -2134,29 +2260,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                         <div className="flex items-center gap-0.5">
                           <button
                             type="button"
+                            title={isJa ? 'Z下降' : 'Nudge -Z (Down)'}
                             onClick={() => {
-                              if (onManualMoveItem) {
-                                const step = gridSnapMm || 50;
-                                const newZ = Math.max(0, target.z - step);
-                                const updated = { ...target, z: newZ };
-                                activeSelectedItemRef.current = updated;
-                                onManualMoveItem(target.id, { x: target.x, y: target.y, z: newZ });
-                                if (onSelectItem) onSelectItem(updated);
-                              }
+                              const step = gridSnapMm || 50;
+                              handleNudgeItem(target, { dz: -step });
                             }}
                             className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >-</button>
                           <button
                             type="button"
+                            title={isJa ? 'Z上昇' : 'Nudge +Z (Up)'}
                             onClick={() => {
-                              if (onManualMoveItem) {
-                                const step = gridSnapMm || 50;
-                                const newZ = Math.min(container.height - target.height, target.z + step);
-                                const updated = { ...target, z: newZ };
-                                activeSelectedItemRef.current = updated;
-                                onManualMoveItem(target.id, { x: target.x, y: target.y, z: newZ });
-                                if (onSelectItem) onSelectItem(updated);
-                              }
+                              const step = gridSnapMm || 50;
+                              handleNudgeItem(target, { dz: step });
                             }}
                             className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
                           >+</button>
@@ -2180,10 +2296,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     <div className="bg-amber-100/70 border border-amber-200/80 rounded px-2 py-1 text-[10px] text-amber-900 flex flex-col gap-0.5">
                       <div className="flex items-center justify-between font-mono">
                         <span className="font-semibold text-slate-700">{isJa ? '↑ ↓ ← →' : 'Arrows'}:</span>
-                        <span>{isJa ? '水平微動 (前後左右)' : 'Planar Nudge'}</span>
+                        <span>{isJa ? '微動 (長押しで高速化⚡)' : 'Nudge (Hold for fast⚡)'}</span>
                       </div>
                       <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">{isJa ? 'Shift+↑/↓' : 'Shift+Up/Dn'}:</span>
+                        <span className="font-semibold text-slate-700">{isJa ? 'Shift+矢印' : 'Shift+Arrows'}:</span>
+                        <span>{isJa ? '最高速ブースト移動' : 'Turbo Boost Nudge'}</span>
+                      </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-semibold text-slate-700">{isJa ? 'PgUp / PgDn' : 'PgUp / PgDn'}:</span>
                         <span>{isJa ? '垂直昇降 (Z軸)' : 'Elevation Z'}</span>
                       </div>
                       <div className="flex items-center justify-between font-mono">
@@ -2833,6 +2953,17 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white text-xs px-4 py-2 rounded-xl shadow-2xl backdrop-blur-md border border-slate-700 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
           <Check className="w-4 h-4 text-emerald-400 shrink-0" />
           <span className="font-medium">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Active Key Hold Acceleration HUD */}
+      {isManualMode && activeSpeedMultiplier > 1 && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-amber-500/95 text-white font-bold text-xs px-3.5 py-1.5 rounded-full shadow-xl border border-amber-300/60 backdrop-blur-sm flex items-center gap-1.5 animate-in fade-in zoom-in-95 pointer-events-none">
+          <span className="text-sm">⚡</span>
+          <span>{isJa ? `長押し高速移動: ${activeSpeedMultiplier}x 速` : `Key Hold Speed: ${activeSpeedMultiplier}x`}</span>
+          <span className="text-[10px] bg-black/25 px-1.5 py-0.5 rounded-full font-mono text-amber-100">
+            ±{Math.round((gridSnapMm || 50) * activeSpeedMultiplier)}mm
+          </span>
         </div>
       )}
 
