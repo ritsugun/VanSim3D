@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Container, CargoItem, Language, UnitSystem, AlgorithmBenchmarkEntry, AutoSelectCriteria, AlgorithmType, GAGoalConfig } from '../types';
 import { runAllAlgorithmsBenchmark, getBestAlgorithmForCriteria } from '../services/packingOptimizer';
 import { 
-  X, Cpu, Trophy, Sparkles, Check, Download, 
+  X, Cpu, Trophy, Sparkles, Check, FileOutput, 
   RefreshCw, Zap, Box, Scale, Truck, ShieldCheck, 
   BarChart2, ArrowRight, CheckCircle2, Sliders, Info, TrendingUp, Layers, Bot
 } from 'lucide-react';
@@ -205,7 +205,7 @@ export const AlgorithmComparisonModal: React.FC<AlgorithmComparisonModalProps> =
               onClick={handleExportCSV}
               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-slate-700"
             >
-              <Download className="w-3.5 h-3.5" />
+              <FileOutput className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{isJa ? 'CSVエクスポート' : 'Export CSV'}</span>
             </button>
             <button

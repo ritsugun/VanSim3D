@@ -1807,6 +1807,7 @@ export function run3DPackingOptimizer(
     cargoItemId: val.cargo.id,
     sku: val.cargo.sku,
     name: val.cargo.name,
+    color: val.cargo.color || '#3b82f6',
     reason: val.reason,
     dimensions: { length: val.cargo.length, width: val.cargo.width, height: val.cargo.height },
     weight: val.cargo.weight,

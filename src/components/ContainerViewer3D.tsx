@@ -8,11 +8,14 @@ import {
   Compass, Crosshair, SlidersHorizontal, Box, Grid3X3, X,
   GripVertical, Blend, Sparkles, Palette,
   Hand, Move, RotateCw, Trash2, Magnet, Check, AlertCircle, ArrowDownToLine, 
-  RefreshCw, Undo2, Redo2, ChevronDown, ChevronUp, Plus, PackagePlus, PackageMinus
+  RefreshCw, Undo2, Redo2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
+  Scale, LayoutGrid, List, Search, Plus, PackagePlus, PackageMinus,
+  HelpCircle, Keyboard
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 import { VIVID_NEON_PALETTE, boostHexToVivid } from '../utils/colors';
 import { calculateSupportHeight, checkContainerBounds, isRestingOnFragile, check3DItemCollision, findMaxNonCollidingPosition } from '../utils/manualAdjustment';
+import { ManualShortcutsHelpModal } from './ManualShortcutsHelpModal';
 
 interface ContainerViewer3DProps {
   container: Container;
@@ -90,6 +93,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   // Manual Adjustment State
   const [internalManualMode, setInternalManualMode] = useState<boolean>(false);
   const [isTrayCollapsed, setIsTrayCollapsed] = useState<boolean>(false);
+  // Unplaced Cargo Tray Sorting & View Modes
+  const [traySortOrder, setTraySortOrder] = useState<'weight-desc' | 'weight-asc' | 'name-asc' | 'count-desc'>('weight-desc');
+  const [trayViewMode, setTrayViewMode] = useState<'scroll' | 'grid'>('scroll');
+  const [traySearchQuery, setTraySearchQuery] = useState<string>('');
+  const trayScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
+  const [canScrollRight, setCanScrollRight] = useState<boolean>(true);
   const isManualMode = isManualModeProp !== undefined 
     ? isManualModeProp 
     : (isManualModeActive !== undefined ? isManualModeActive : internalManualMode);
@@ -125,6 +135,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
   const [confirmingUnload, setConfirmingUnload] = useState<boolean>(false);
   const confirmTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState<boolean>(false);
+  const containerTabsScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Key hold acceleration tracking for manual mode arrow navigation
   const [activeSpeedMultiplier, setActiveSpeedMultiplier] = useState<number>(1);
@@ -173,6 +185,80 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       setToastMessage(prev => prev === msg ? null : prev);
     }, 3500);
   }, []);
+
+  // Resolve authentic item color from unplaced item, cargoList, or packedItems
+  const getUnplacedItemColor = useCallback((item: UnplacedItem): string => {
+    if (item.color) return item.color;
+    const foundInCargo = cargoList.find(c => 
+      (item.cargoItemId && c.id === item.cargoItemId) || 
+      (item.sku && c.sku === item.sku) ||
+      (item.name && c.name === item.name)
+    );
+    if (foundInCargo?.color) return foundInCargo.color;
+    const foundInPacked = packedItems.find(p => 
+      (item.cargoItemId && p.cargoItemId === item.cargoItemId) || 
+      (item.sku && p.sku === item.sku) ||
+      (item.name && p.name === item.name)
+    );
+    if (foundInPacked?.color) return foundInPacked.color;
+    return '#3b82f6';
+  }, [cargoList, packedItems]);
+
+  // Unplaced cargo items filtered and sorted (Weight descending by default for heavy-cargo-first placement)
+  const sortedUnplacedItems = useMemo(() => {
+    if (!unplacedItems || unplacedItems.length === 0) return [];
+    let items = [...unplacedItems];
+    if (traySearchQuery.trim()) {
+      const q = traySearchQuery.toLowerCase().trim();
+      items = items.filter(it => 
+        (it.name && it.name.toLowerCase().includes(q)) || 
+        (it.sku && it.sku.toLowerCase().includes(q))
+      );
+    }
+    switch (traySortOrder) {
+      case 'weight-desc':
+        return items.sort((a, b) => b.weight - a.weight);
+      case 'weight-asc':
+        return items.sort((a, b) => a.weight - b.weight);
+      case 'count-desc':
+        return items.sort((a, b) => (b.count || 1) - (a.count || 1));
+      case 'name-asc':
+        return items.sort((a, b) => a.name.localeCompare(b.name));
+      default:
+        return items;
+    }
+  }, [unplacedItems, traySortOrder, traySearchQuery]);
+
+  const checkTrayScrollBounds = useCallback(() => {
+    const el = trayScrollContainerRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 6);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 6);
+  }, []);
+
+  const handleScrollTray = useCallback((direction: 'left' | 'right') => {
+    const el = trayScrollContainerRef.current;
+    if (!el) return;
+    const scrollAmount = Math.max(280, Math.floor(el.clientWidth * 0.75));
+    el.scrollBy({
+      left: direction === 'left' ? -scrollAmount : scrollAmount,
+      behavior: 'smooth'
+    });
+    setTimeout(checkTrayScrollBounds, 350);
+  }, [checkTrayScrollBounds]);
+
+  const handleTrayWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    if (trayViewMode === 'scroll' && trayScrollContainerRef.current) {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        trayScrollContainerRef.current.scrollLeft += e.deltaY;
+        checkTrayScrollBounds();
+      }
+    }
+  }, [trayViewMode, checkTrayScrollBounds]);
+
+  useEffect(() => {
+    checkTrayScrollBounds();
+  }, [sortedUnplacedItems, trayViewMode, checkTrayScrollBounds]);
 
   // Interaction & Display States
   const [internalActiveTab, setInternalActiveTab] = useState<number | 'all'>(activeContainerIndex);
@@ -398,6 +484,54 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
   const activeSelectedItemRef = useRef<PackedItem | null>(activeSelectedItem);
   activeSelectedItemRef.current = activeSelectedItem;
+
+  const heldUnplacedItemRef = useRef(heldUnplacedItem);
+  heldUnplacedItemRef.current = heldUnplacedItem;
+
+  const isDraggingExistingItemRef = useRef(isDraggingExistingItem);
+  isDraggingExistingItemRef.current = isDraggingExistingItem;
+
+  const isManualModeRef = useRef(isManualMode);
+  isManualModeRef.current = isManualMode;
+
+  const showShortcutsHelpRef = useRef(showShortcutsHelp);
+  showShortcutsHelpRef.current = showShortcutsHelp;
+
+  // Cancel active placement or reposition mode with top priority
+  const cancelPlacementMode = useCallback((): boolean => {
+    const wasRepositioning = isDraggingExistingItemRef.current;
+    const wasHoldingUnplaced = heldUnplacedItemRef.current || draggedUnplacedRef.current;
+
+    if (wasRepositioning) {
+      const targetItem = wasRepositioning;
+      setIsDraggingExistingItem(null);
+      isDraggingExistingItemRef.current = null;
+      setGhostCoords(null);
+      // Re-select original item so user retains control
+      setInternalSelectedItem(targetItem);
+      activeSelectedItemRef.current = targetItem;
+      if (onSelectItem) onSelectItem(targetItem);
+      showToast(isJa 
+        ? `「${targetItem.name}」の再配置をキャンセルしました (Esc / C)`
+        : `Cancelled repositioning "${targetItem.name}" (Esc / C)`);
+      return true;
+    }
+
+    if (wasHoldingUnplaced) {
+      const unplacedItem = heldUnplacedItemRef.current?.unplaced || draggedUnplacedRef.current?.unplaced;
+      const targetName = unplacedItem?.name || (isJa ? '荷物' : 'item');
+      setHeldUnplacedItem(null);
+      heldUnplacedItemRef.current = null;
+      draggedUnplacedRef.current = null;
+      setGhostCoords(null);
+      showToast(isJa 
+        ? `「${targetName}」の配置モードをキャンセルしました (Esc / C)`
+        : `Cancelled placement mode for "${targetName}" (Esc / C)`);
+      return true;
+    }
+
+    return false;
+  }, [isJa, onSelectItem, showToast]);
 
   // Drop selected cargo to nearest underlying support (floor or top of underlying box)
   const handleDropItemToSupport = useCallback((targetItem?: PackedItem | null) => {
@@ -1536,6 +1670,46 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         return;
       }
 
+      // Escape or Cancel (C / Q) key handling - HIGHEST PRIORITY
+      const isEscape = e.key === 'Escape' || e.key === 'Esc' || e.code === 'Escape';
+      const isCancelKey = (e.key === 'c' || e.key === 'C' || e.code === 'KeyC') && !e.ctrlKey && !e.metaKey && !e.altKey;
+      const isQuitKey = (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ') && !e.ctrlKey && !e.metaKey && !e.altKey;
+
+      if (isEscape || ((isCancelKey || isQuitKey) && (heldUnplacedItemRef.current || isDraggingExistingItemRef.current || draggedUnplacedRef.current))) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // 1. If shortcuts help modal is open and Escape was pressed, close it
+        if (isEscape && showShortcutsHelpRef.current) {
+          setShowShortcutsHelp(false);
+          return;
+        }
+
+        // 2. HIGHEST PRIORITY: Cancel placement mode or reposition mode
+        if (cancelPlacementMode()) {
+          return;
+        }
+
+        // 3. Deselect current cargo item (only on Escape)
+        if (isEscape) {
+          const currentSelected = activeSelectedItemRef.current || internalSelectedItem || externalSelectedItem;
+          if (currentSelected) {
+            setInternalSelectedItem(null);
+            activeSelectedItemRef.current = null;
+            if (onSelectItem) onSelectItem(null);
+            showToast(isJa ? '選択を解除しました' : 'Deselected item');
+            return;
+          }
+
+          // 4. Exit full screen if in full screen
+          if (isFullScreen && !document.fullscreenElement) {
+            setIsFullScreen(false);
+            return;
+          }
+        }
+        return;
+      }
+
       const rawTarget = externalSelectedItem || internalSelectedItem;
       const currentSelected = (activeSelectedItemRef.current && rawTarget && activeSelectedItemRef.current.id === rawTarget.id)
         ? activeSelectedItemRef.current
@@ -1647,13 +1821,40 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         }
 
         handleNudgeItem(currentSelected, { dx, dy, dz });
-      } else if (e.key === 'Escape') {
-        setHeldUnplacedItem(null);
-        setIsDraggingExistingItem(null);
-        setGhostCoords(null);
-        setInternalSelectedItem(null);
-        activeSelectedItemRef.current = null;
-        if (onSelectItem) onSelectItem(null);
+      } else if (e.key === 'm' || e.key === 'M') {
+        // M key: Toggle Manual Mode ON/OFF directly
+        e.preventDefault();
+        const nextMode = !isManualModeRef.current;
+        if (onToggleManualMode) {
+          onToggleManualMode(nextMode);
+        } else {
+          setInternalManualMode(nextMode);
+        }
+        if (!nextMode) {
+          cancelPlacementMode();
+        }
+        showToast(language === 'ja'
+          ? (nextMode ? '🛠️ 手動調整モードを有効化しました (キー: M)' : '📦 通常モードに切り替えました (キー: M)')
+          : (nextMode ? '🛠️ Manual Mode ON (Key: M)' : '📦 Normal Mode ON (Key: M)'));
+      } else if ((e.key === 'g' || e.key === 'G') && isManualMode) {
+        // G key: Enter or toggle reposition mode for currently selected cargo (Grab & Move)
+        e.preventDefault();
+        if (isDraggingExistingItemRef.current) {
+          cancelPlacementMode();
+        } else if (currentSelected) {
+          setIsDraggingExistingItem(currentSelected);
+          isDraggingExistingItemRef.current = currentSelected;
+          setInternalSelectedItem(null);
+          activeSelectedItemRef.current = null;
+          if (onSelectItem) onSelectItem(null);
+          showToast(language === 'ja'
+            ? `「${currentSelected.name}」の再配置モードを開始しました。移動先を3D画面内でクリックしてください (Esc / C でキャンセル)`
+            : `Moving "${currentSelected.name}". Click target position in 3D scene (Esc / C to cancel)`);
+        }
+      } else if (e.key === '?' || (e.key === 'h' || e.key === 'H')) {
+        // ? or H: Toggle shortcuts help modal
+        e.preventDefault();
+        setShowShortcutsHelp(prev => !prev);
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && isManualMode) {
         if (currentSelected && onManualRemoveItem) {
           onManualRemoveItem(currentSelected.id);
@@ -1679,9 +1880,17 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       }
     };
 
+    const handleContextMenu = (e: MouseEvent) => {
+      if (heldUnplacedItemRef.current || isDraggingExistingItemRef.current || draggedUnplacedRef.current) {
+        e.preventDefault();
+        cancelPlacementMode();
+      }
+    };
+
     containerEl.addEventListener('mousedown', handleMouseDown);
     containerEl.addEventListener('mousemove', handleMouseMove);
     containerEl.addEventListener('click', handleClick);
+    containerEl.addEventListener('contextmenu', handleContextMenu);
     containerEl.addEventListener('dragover', handleDragOver);
     containerEl.addEventListener('drop', handleDrop);
     window.addEventListener('keydown', handleKeyDown);
@@ -1691,6 +1900,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       containerEl.removeEventListener('mousedown', handleMouseDown);
       containerEl.removeEventListener('mousemove', handleMouseMove);
       containerEl.removeEventListener('click', handleClick);
+      containerEl.removeEventListener('contextmenu', handleContextMenu);
       containerEl.removeEventListener('dragover', handleDragOver);
       containerEl.removeEventListener('drop', handleDrop);
       window.removeEventListener('keydown', handleKeyDown);
@@ -1700,7 +1910,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     isManualMode, heldUnplacedItem, isDraggingExistingItem, currentTab, containers, 
     container, gridSnapMm, onManualPlaceItem, onManualMoveItem, onManualRemoveItem, 
     onSelectItem, externalSelectedItem, internalSelectedItem, language, showToast, packedItems,
-    onUndo, onRedo, canUndo, canRedo, handleDropItemToSupport
+    onUndo, onRedo, canUndo, canRedo, handleDropItemToSupport, cancelPlacementMode
   ]);
 
   // Camera preset views
@@ -1787,43 +1997,70 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       </div>
 
       {/* Top Floating Container Selector Tabs & Quick Badges */}
-      <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none gap-2 flex-wrap z-10">
-        <div className="flex items-center gap-1.5 pointer-events-auto bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-800 flex-wrap">
+      <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none gap-2 z-10 min-w-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-800 min-w-0 max-w-[calc(100%-240px)] sm:max-w-[calc(100%-290px)]">
           <Box className="w-4 h-4 text-blue-600 shrink-0" />
-          <span className="font-semibold text-slate-900">{container.name}</span>
+          <span className="font-semibold text-slate-900 shrink-0 hidden md:inline">{container.name}</span>
 
           {hasMultipleContainers ? (
-            <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
-              {containers.map((cLoad, idx) => {
-                const cIndex = cLoad.containerIndex || (idx + 1);
-                const isActive = currentTab === cIndex;
-                return (
-                  <button
-                    key={cIndex}
-                    type="button"
-                    onClick={() => setTab(cIndex)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
-                      isActive
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    #{cIndex} ({(cLoad.metrics.volumeUtilization || 0).toFixed(0)}%)
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setTab('all')}
-                className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-all ${
-                  currentTab === 'all'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
+            <div className="flex items-center gap-0.5 sm:gap-1 ml-1 sm:ml-2 border-l border-slate-200 pl-1 sm:pl-2 min-w-0">
+              {containers.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => containerTabsScrollRef.current?.scrollBy({ left: -100, behavior: 'smooth' })}
+                  className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors cursor-pointer"
+                  title={isJa ? '前のコンテナへスクロール' : 'Scroll left'}
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              )}
+
+              <div 
+                ref={containerTabsScrollRef}
+                className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth py-0.5 max-w-[28vw] sm:max-w-[36vw] md:max-w-[42vw] lg:max-w-[48vw]"
               >
-                <Grid3X3 className="w-3 h-3" />
-                <span>{isJa ? '全台並列' : 'Side-by-Side'}</span>
-              </button>
+                {containers.map((cLoad, idx) => {
+                  const cIndex = cLoad.containerIndex || (idx + 1);
+                  const isActive = currentTab === cIndex;
+                  return (
+                    <button
+                      key={cIndex}
+                      type="button"
+                      onClick={() => setTab(cIndex)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold shrink-0 whitespace-nowrap transition-all ${
+                        isActive
+                          ? 'bg-slate-900 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      #{cIndex} ({(cLoad.metrics.volumeUtilization || 0).toFixed(0)}%)
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setTab('all')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap transition-all ${
+                    currentTab === 'all'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <Grid3X3 className="w-3 h-3" />
+                  <span>{isJa ? '全台並列' : 'Side-by-Side'}</span>
+                </button>
+              </div>
+
+              {containers.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => containerTabsScrollRef.current?.scrollBy({ left: 100, behavior: 'smooth' })}
+                  className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors cursor-pointer"
+                  title={isJa ? '次のコンテナへスクロール' : 'Scroll right'}
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
@@ -1838,14 +2075,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
           )}
 
-          <span className="text-slate-300 mx-1">|</span>
-          <span className="text-slate-900 font-mono font-bold">
+          <span className="text-slate-300 mx-1 shrink-0">|</span>
+          <span className="text-slate-900 font-mono font-bold shrink-0 whitespace-nowrap">
             {activeItemsToDisplay.length} {isJa ? '個 積載' : 'Boxes'}
           </span>
         </div>
 
         {/* Top-Right Viewer Toolbar */}
-        <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-lg border border-slate-200 shadow-sm text-xs">
+        <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-lg border border-slate-200 shadow-sm text-xs shrink-0 z-10">
           <button
             id="toggle-slice-controls-btn"
             onClick={() => setShowSliceControls(!showSliceControls)}
@@ -1881,7 +2118,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 setGhostCoords(null);
               }
             }}
-            title={isJa ? '手動調整モード切替: 未積載荷物のドラッグ配置・位置修正' : 'Toggle Manual Adjustment Mode'}
+            title={isJa ? '手動調整モード切替 (Mキーで切替)' : 'Toggle Manual Adjustment Mode (M key)'}
             className={`px-2.5 py-1.5 rounded-md transition-all flex items-center gap-1.5 font-bold ${
               isManualMode
                 ? 'bg-amber-500 text-slate-950 shadow-xs ring-2 ring-amber-400/70'
@@ -1892,6 +2129,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           >
             <Hand className={`w-3.5 h-3.5 ${isManualMode ? 'text-slate-950' : 'text-amber-500'}`} />
             <span className="text-xs">{isJa ? '手動調整' : 'Manual'}</span>
+            <kbd className={`px-1 py-0.2 rounded text-[9px] font-mono font-bold ${isManualMode ? 'bg-amber-600/30 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>M</kbd>
             {hasManualAdjustments && (
               <span className="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[10px] font-bold">
                 {manualAdjustmentsCount || '✓'}
@@ -1929,6 +2167,15 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             }`}
           >
             {isFullScreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+          </button>
+          <div className="w-px h-4 bg-slate-200 mx-0.5" />
+          <button
+            id="shortcuts-help-btn"
+            onClick={() => setShowShortcutsHelp(true)}
+            title={isJa ? '操作・ショートカット一覧ヘルプ (?)' : 'Keyboard Shortcuts Help (?)'}
+            className="p-1.5 rounded-md hover:bg-amber-100 text-slate-700 hover:text-amber-900 transition-colors flex items-center justify-center"
+          >
+            <HelpCircle className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -2090,12 +2337,27 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               </button>
             )}
 
+            {/* Keyboard Shortcuts Help */}
+            <button
+              id="banner-shortcuts-help-btn"
+              type="button"
+              onClick={() => setShowShortcutsHelp(true)}
+              title={isJa ? 'キーボードショートカット一覧ヘルプ (?)' : 'Keyboard Shortcuts Help (?)'}
+              className="px-2 py-1 rounded-md bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors"
+            >
+              <Keyboard className="w-3 h-3 text-amber-700" />
+              <span>{isJa ? '操作ヘルプ (?)' : 'Help (?)'}</span>
+            </button>
+
             {/* Done */}
             <button
               id="banner-done-btn"
               onClick={() => {
                 setIsManualMode(false);
                 setHeldUnplacedItem(null);
+                heldUnplacedItemRef.current = null;
+                setIsDraggingExistingItem(null);
+                isDraggingExistingItemRef.current = null;
                 setGhostCoords(null);
               }}
               className="px-2.5 py-1 rounded-md bg-slate-900 hover:bg-black text-white flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors"
@@ -2104,6 +2366,44 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               <span>{isJa ? '完了' : 'Done'}</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Floating Placement / Reposition Active Banner with Cancel Shortcut (Esc / C) */}
+      {(heldUnplacedItem || isDraggingExistingItem) && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-2.5 bg-slate-900/95 hover:bg-slate-900 text-white px-4 py-2 rounded-full shadow-2xl border border-amber-400/80 backdrop-blur-md animate-fade-in transition-all">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+            </span>
+            <span className="truncate max-w-[200px] sm:max-w-xs text-amber-200">
+              {isDraggingExistingItem ? (
+                isJa ? `再配置中: 「${isDraggingExistingItem.name}」` : `Repositioning: "${isDraggingExistingItem.name}"`
+              ) : (
+                isJa ? `配置中: 「${heldUnplacedItem?.unplaced.name}」` : `Placing: "${heldUnplacedItem?.unplaced.name}"`
+              )}
+            </span>
+            <span className="text-slate-300 text-[11px] font-normal hidden md:inline">
+              {isJa ? '（3D画面内クリックで配置確定）' : '(Click in 3D to place)'}
+            </span>
+          </div>
+
+          <button
+            id="floating-cancel-placement-btn"
+            type="button"
+            onClick={cancelPlacementMode}
+            title={isJa ? '配置モードをキャンセル (Esc / C / 右クリック)' : 'Cancel Placement Mode (Esc / C / Right-Click)'}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>{isJa ? '配置キャンセル' : 'Cancel'}</span>
+            <span className="flex items-center gap-0.5 ml-0.5">
+              <kbd className="px-1.5 py-0.5 rounded bg-slate-900 text-amber-300 font-mono text-[10px] font-bold border border-slate-700">Esc</kbd>
+              <span className="text-slate-900 font-bold text-[10px]">/</span>
+              <kbd className="px-1.5 py-0.5 rounded bg-slate-900 text-amber-300 font-mono text-[10px] font-bold border border-slate-700">C</kbd>
+            </span>
+          </button>
         </div>
       )}
 
@@ -2310,6 +2610,25 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                         <span className="font-semibold text-slate-700">{isJa ? 'Space / D' : 'Space / D'}:</span>
                         <span>{isJa ? '直下へ着地' : 'Gravity Drop'}</span>
                       </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-semibold text-slate-700">M:</span>
+                        <span>{isJa ? '手動モード切替' : 'Toggle Manual Mode'}</span>
+                      </div>
+                      <div className="flex items-center justify-between font-mono">
+                        <span className="font-semibold text-slate-700">G:</span>
+                        <span>{isJa ? '再配置モード (移動)' : 'Reposition Mode'}</span>
+                      </div>
+                      <div className="pt-0.5 border-t border-amber-200/80 flex items-center justify-between">
+                        <span className="text-[9px] text-amber-800">{isJa ? '全一覧:' : 'All:'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowShortcutsHelp(true)}
+                          className="text-[9px] text-amber-900 font-bold underline hover:text-amber-950 flex items-center gap-0.5 cursor-pointer"
+                        >
+                          <HelpCircle className="w-2.5 h-2.5" />
+                          <span>{isJa ? 'ショートカット一覧 (?)' : 'Shortcuts (?)'}</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Action buttons: Move (reposition), Rotate & Remove */}
@@ -2318,17 +2637,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                         type="button"
                         onClick={() => {
                           setIsDraggingExistingItem(target);
+                          isDraggingExistingItemRef.current = target;
                           setInternalSelectedItem(null);
+                          activeSelectedItemRef.current = null;
                           if (onSelectItem) onSelectItem(null);
                           showToast(isJa
-                            ? `「${target.name}」の再配置モードを開始しました。移動先を3D画面内でクリックしてください (Escでキャンセル)`
-                            : `Moving "${target.name}". Click target position in 3D scene (Esc to cancel)`);
+                            ? `「${target.name}」の再配置モードを開始しました。移動先を3D画面内でクリックしてください (Esc / C でキャンセル)`
+                            : `Moving "${target.name}". Click target position in 3D scene (Esc / C to cancel)`);
                         }}
                         className="flex-1 py-1 px-1 rounded bg-white hover:bg-amber-100 border border-amber-300 text-slate-800 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
-                        title={isJa ? '3D画面内でクリックして位置変更' : 'Click in 3D to reposition'}
+                        title={isJa ? '3D画面内でクリックして位置変更 (ショートカット: G / Escでキャンセル)' : 'Click in 3D to reposition (Shortcut: G / Esc to cancel)'}
                       >
                         <Move className="w-3 h-3 text-amber-700" />
-                        <span>{isJa ? '再配置' : 'Move'}</span>
+                        <span>{isJa ? '再配置 (G)' : 'Move (G)'}</span>
                       </button>
                       <button
                         type="button"
@@ -2781,31 +3102,135 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           className="absolute bottom-3 left-3 right-3 pointer-events-auto bg-white/95 backdrop-blur-md rounded-xl border border-slate-200 shadow-xl z-20 overflow-hidden flex flex-col text-slate-800 transition-all duration-200"
         >
           {/* Tray Header */}
-          <div className="px-3.5 py-2 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <PackagePlus className="w-4 h-4 text-amber-600" />
+          <div className="px-3.5 py-2 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <PackagePlus className="w-4 h-4 text-amber-600 shrink-0" />
               <span className="font-bold text-slate-900">
                 {isJa ? '手動配置・未積載荷物トレイ' : 'Manual Placement Cargo Tray'}
               </span>
               <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full text-[11px] font-bold border border-amber-300">
                 {unplacedItems.reduce((acc, it) => acc + (it.count || 1), 0)} {isJa ? '個 未積載' : 'unplaced'}
               </span>
-              <span className="text-slate-400 text-[11px] hidden sm:inline">
-                {isJa ? '※荷物をクリックまたはドラッグして3Dコンテナ内の任意の位置に配置できます' : 'Click or drag item into the 3D container to place'}
-              </span>
+
+              {/* Weight Sort Controls */}
+              {unplacedItems.length > 1 && (
+                <div className="flex items-center bg-white rounded-lg p-0.5 border border-slate-200 shadow-2xs text-[11px]">
+                  <button
+                    type="button"
+                    id="tray-sort-weight-btn"
+                    onClick={() => {
+                      const next = traySortOrder === 'weight-desc' ? 'weight-asc' : 'weight-desc';
+                      setTraySortOrder(next);
+                      showToast(isJa 
+                        ? (next === 'weight-desc' ? '重量順（重い順 ↓）に並び替えました' : '重量順（軽い順 ↑）に並び替えました')
+                        : (next === 'weight-desc' ? 'Sorted by weight (heaviest first)' : 'Sorted by weight (lightest first)'));
+                    }}
+                    className={`px-2 py-0.5 rounded font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                      traySortOrder.startsWith('weight')
+                        ? 'bg-amber-500 text-slate-950 shadow-2xs'
+                        : 'hover:bg-slate-100 text-slate-700'
+                    }`}
+                    title={isJa ? '重量順で並び替え (クリックで重い順/軽い順を切替)' : 'Sort by weight (Click to toggle heavy/light)'}
+                  >
+                    <Scale className="w-3 h-3 text-current" />
+                    <span>{isJa ? '重量順' : 'Weight'}</span>
+                    {traySortOrder === 'weight-desc' ? (
+                      <span className="text-[10px] font-mono font-extrabold">↓{isJa ? '重' : 'H'}</span>
+                    ) : traySortOrder === 'weight-asc' ? (
+                      <span className="text-[10px] font-mono font-extrabold">↑{isJa ? '軽' : 'L'}</span>
+                    ) : null}
+                  </button>
+
+                  <button
+                    type="button"
+                    id="tray-sort-toggle-other-btn"
+                    onClick={() => {
+                      const next = traySortOrder === 'count-desc' ? 'name-asc' : 'count-desc';
+                      setTraySortOrder(next);
+                      showToast(isJa 
+                        ? (next === 'count-desc' ? '個数順に並び替えました' : '品名順に並び替えました')
+                        : (next === 'count-desc' ? 'Sorted by quantity' : 'Sorted by name'));
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+                      !traySortOrder.startsWith('weight')
+                        ? 'bg-amber-100 text-amber-950 font-bold border border-amber-300'
+                        : 'hover:bg-slate-100 text-slate-500'
+                    }`}
+                    title={isJa ? '数量順 / 品名順で並び替え' : 'Sort by count or name'}
+                  >
+                    {traySortOrder === 'count-desc' ? (isJa ? '数量順' : 'Count') : traySortOrder === 'name-asc' ? (isJa ? '品名順' : 'Name') : (isJa ? '他' : 'Other')}
+                  </button>
+                </div>
+              )}
+
+              {/* View Mode Toggle (Single-row Horizontal Scroll vs Multi-row Grid) */}
+              {unplacedItems.length > 2 && (
+                <div className="flex items-center bg-white rounded-lg p-0.5 border border-slate-200 shadow-2xs text-[11px]">
+                  <button
+                    type="button"
+                    id="tray-view-scroll-btn"
+                    onClick={() => setTrayViewMode('scroll')}
+                    className={`px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                      trayViewMode === 'scroll' 
+                        ? 'bg-slate-900 text-white shadow-2xs font-bold' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                    title={isJa ? '横スクロール表示 (ホイール・矢印操作対応)' : 'Horizontal scroll mode'}
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{isJa ? '横スクロール' : 'Scroll'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="tray-view-grid-btn"
+                    onClick={() => setTrayViewMode('grid')}
+                    className={`px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 cursor-pointer ${
+                      trayViewMode === 'grid' 
+                        ? 'bg-amber-500 text-slate-950 shadow-2xs font-bold' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                    title={isJa ? 'グリッド一覧展開 (大量の荷物を画面内に一括表示・縦スクロール)' : 'Grid view (Show all items)'}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">{isJa ? 'グリッド展開' : 'Grid'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Optional Quick Search Filter when items > 5 */}
+              {unplacedItems.length > 5 && (
+                <div className="relative flex items-center">
+                  <Search className="w-3 h-3 text-slate-400 absolute left-2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={traySearchQuery}
+                    onChange={(e) => setTraySearchQuery(e.target.value)}
+                    placeholder={isJa ? '品名・SKU検索...' : 'Search...'}
+                    className="pl-6 pr-2 py-0.5 text-[11px] bg-white border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-amber-500 w-24 sm:w-28 transition-all"
+                  />
+                  {traySearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setTraySearchQuery('')}
+                      className="absolute right-1 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
               {heldUnplacedItem && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setHeldUnplacedItem(null);
-                    setGhostCoords(null);
-                  }}
-                  className="px-2 py-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold transition-colors"
+                  onClick={cancelPlacementMode}
+                  className="px-2.5 py-1 rounded bg-amber-200 hover:bg-amber-300 text-amber-950 text-[11px] font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                  title={isJa ? '配置モードをキャンセル (Esc / C / 右クリック)' : 'Cancel Placement Mode (Esc / C / Right-Click)'}
                 >
-                  {isJa ? '配置キャンセル' : 'Cancel Placement'}
+                  <X className="w-3 h-3" />
+                  <span>{isJa ? '配置キャンセル (Esc/C)' : 'Cancel (Esc/C)'}</span>
                 </button>
               )}
               {onManualUnloadContainer && (
@@ -2842,106 +3267,259 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </div>
           </div>
 
-          {/* Tray Body: Horizontally scrollable items */}
+          {/* Tray Body: Horizontally scrollable items or Expanded Grid */}
           {!isTrayCollapsed && (
-            <div className="p-2.5 overflow-x-auto flex items-center gap-2.5 max-h-36 scrollbar-thin">
+            <div>
               {unplacedItems.length === 0 ? (
-                <div className="py-3 px-4 text-slate-600 text-xs flex flex-wrap items-center justify-between gap-3 w-full bg-slate-50/80 rounded-lg border border-dashed border-slate-300">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-                    <span>
-                      {isJa 
-                        ? 'すべての貨物がコンテナ内に配置済みです。手動でゼロから載せ直す場合は一括アンロードを実行できます。' 
-                        : 'All items are currently loaded. To manually pack from scratch, unload all items to tray.'}
-                    </span>
+                <div className="p-3">
+                  <div className="py-3 px-4 text-slate-600 text-xs flex flex-wrap items-center justify-between gap-3 w-full bg-slate-50/80 rounded-lg border border-dashed border-slate-300">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                      <span>
+                        {isJa 
+                          ? 'すべての貨物がコンテナ内に配置済みです。手動でゼロから載せ直す場合は一括アンロードを実行できます。' 
+                          : 'All items are currently loaded. To manually pack from scratch, unload all items to tray.'}
+                      </span>
+                    </div>
+                    {onManualUnloadContainer && (
+                      <button
+                        type="button"
+                        id="tray-empty-state-unload-btn"
+                        onClick={handleUnloadContainerAll}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer ${
+                          confirmingUnload
+                            ? 'bg-red-600 text-white animate-pulse'
+                            : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-300'
+                        }`}
+                      >
+                        <PackageMinus className="w-3.5 h-3.5 text-current" />
+                        <span>
+                          {confirmingUnload
+                            ? (isJa ? '本当に空にしますか？ (クリックで確定)' : 'Confirm Unload All Cargo?')
+                            : (isJa ? 'コンテナを空にして手動で載せる (一括アンロード)' : 'Unload Container & Pack Manually')}
+                        </span>
+                      </button>
+                    )}
                   </div>
-                  {onManualUnloadContainer && (
+                </div>
+              ) : sortedUnplacedItems.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-500">
+                  {isJa ? `「${traySearchQuery}」に一致する荷物が見つかりませんでした。` : `No unplaced items match "${traySearchQuery}".`}
+                  <button 
+                    type="button" 
+                    onClick={() => setTraySearchQuery('')} 
+                    className="ml-2 text-amber-600 underline font-semibold cursor-pointer"
+                  >
+                    {isJa ? '検索をクリア' : 'Clear search'}
+                  </button>
+                </div>
+              ) : trayViewMode === 'scroll' ? (
+                /* 1-Row Horizontal Scroll View with Left/Right Navigation Buttons and Wheel Support */
+                <div className="relative flex items-center group/tray">
+                  {/* Left Scroll Navigation Button */}
+                  {sortedUnplacedItems.length > 2 && (
                     <button
                       type="button"
-                      id="tray-empty-state-unload-btn"
-                      onClick={handleUnloadContainerAll}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer ${
-                        confirmingUnload
-                          ? 'bg-red-600 text-white animate-pulse'
-                          : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-300'
+                      id="tray-scroll-left-btn"
+                      onClick={() => handleScrollTray('left')}
+                      disabled={!canScrollLeft}
+                      className={`absolute left-1 z-20 p-1.5 rounded-full bg-white/95 text-slate-700 shadow-md border border-slate-200 transition-all cursor-pointer ${
+                        canScrollLeft 
+                          ? 'hover:bg-amber-100 hover:text-amber-950 hover:scale-110 active:scale-95 opacity-90 hover:opacity-100' 
+                          : 'opacity-30 cursor-not-allowed'
                       }`}
+                      title={isJa ? '左へスクロール (マウスホイールでもスクロール可能)' : 'Scroll Left (Mouse wheel also works)'}
                     >
-                      <PackageMinus className="w-3.5 h-3.5 text-current" />
-                      <span>
-                        {confirmingUnload
-                          ? (isJa ? '本当に空にしますか？ (クリックで確定)' : 'Confirm Unload All Cargo?')
-                          : (isJa ? 'コンテナを空にして手動で載せる (一括アンロード)' : 'Unload Container & Pack Manually')}
-                      </span>
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  <div 
+                    ref={trayScrollContainerRef}
+                    onScroll={checkTrayScrollBounds}
+                    onWheel={handleTrayWheel}
+                    className="p-2.5 px-9 overflow-x-auto flex items-center gap-2.5 max-h-36 scrollbar-thin w-full scroll-smooth select-none"
+                  >
+                    {sortedUnplacedItems.map((item, idx) => {
+                      const isHeld = heldUnplacedItem?.unplaced.sku === item.sku;
+                      const itemColor = getUnplacedItemColor(item);
+                      return (
+                        <div
+                          key={`${item.sku}-${idx}`}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('text/plain', item.sku);
+                            draggedUnplacedRef.current = {
+                              unplaced: item,
+                              rotation: 0,
+                              color: itemColor
+                            };
+                          }}
+                          onDragEnd={() => {
+                            draggedUnplacedRef.current = null;
+                            setGhostCoords(null);
+                          }}
+                          onClick={() => {
+                            if (isHeld) {
+                              cancelPlacementMode();
+                            } else {
+                              const held = {
+                                unplaced: item,
+                                rotation: 0 as const,
+                                color: itemColor
+                              };
+                              setHeldUnplacedItem(held);
+                              heldUnplacedItemRef.current = held;
+                              setIsDraggingExistingItem(null);
+                              isDraggingExistingItemRef.current = null;
+                              setInternalSelectedItem(null);
+                              activeSelectedItemRef.current = null;
+                              if (onSelectItem) onSelectItem(null);
+                              showToast(isJa 
+                                ? `「${item.name}」を選択しました。3D画面内をクリックで配置 (Esc / C でキャンセル)` 
+                                : `Selected "${item.name}". Click in 3D to place (Esc / C to cancel)`);
+                            }
+                          }}
+                          className={`shrink-0 flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-all duration-150 select-none ${
+                            isHeld
+                              ? 'bg-amber-100/90 border-amber-500 shadow-md ring-2 ring-amber-400 scale-[1.02]'
+                              : 'bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300 shadow-xs'
+                          }`}
+                          style={{ minWidth: '195px' }}
+                        >
+                          <div 
+                            className="w-5 h-5 rounded-md shrink-0 border border-black/10 flex items-center justify-center text-white shadow-2xs"
+                            style={{ backgroundColor: itemColor }}
+                          >
+                            <Box className="w-3 h-3" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-slate-900 truncate text-[11px]">{item.name}</span>
+                              <span className="bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded font-mono font-bold text-[10px]">
+                                x{item.count}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between gap-1 mt-0.5">
+                              <span className="truncate">{item.dimensions.length}×{item.dimensions.width}×{item.dimensions.height}</span>
+                              <span className={`px-1.5 py-0.2 rounded font-bold shrink-0 ${
+                                traySortOrder.startsWith('weight') 
+                                  ? 'bg-amber-100 text-amber-950 border border-amber-300' 
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {item.weight}kg
+                              </span>
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-slate-400 hover:text-slate-700">
+                            <Move className="w-3.5 h-3.5" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Right Scroll Navigation Button */}
+                  {sortedUnplacedItems.length > 2 && (
+                    <button
+                      type="button"
+                      id="tray-scroll-right-btn"
+                      onClick={() => handleScrollTray('right')}
+                      disabled={!canScrollRight}
+                      className={`absolute right-1 z-20 p-1.5 rounded-full bg-white/95 text-slate-700 shadow-md border border-slate-200 transition-all cursor-pointer ${
+                        canScrollRight 
+                          ? 'hover:bg-amber-100 hover:text-amber-950 hover:scale-110 active:scale-95 opacity-90 hover:opacity-100' 
+                          : 'opacity-30 cursor-not-allowed'
+                      }`}
+                      title={isJa ? '右へスクロール (マウスホイールでもスクロール可能)' : 'Scroll Right (Mouse wheel also works)'}
+                    >
+                      <ChevronRight className="w-4 h-4" />
                     </button>
                   )}
                 </div>
               ) : (
-                unplacedItems.map((item, idx) => {
-                  const isHeld = heldUnplacedItem?.unplaced.sku === item.sku;
-                  const itemColor = (item as any).color || '#3b82f6';
-                  return (
-                    <div
-                      key={`${item.sku}-${idx}`}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', item.sku);
-                        draggedUnplacedRef.current = {
-                          unplaced: item,
-                          rotation: 0,
-                          color: itemColor
-                        };
-                      }}
-                      onDragEnd={() => {
-                        draggedUnplacedRef.current = null;
-                        setGhostCoords(null);
-                      }}
-                      onClick={() => {
-                        if (isHeld) {
-                          setHeldUnplacedItem(null);
-                          setGhostCoords(null);
-                        } else {
-                          setHeldUnplacedItem({
+                /* Multi-row Expanded Grid View (allows browsing all items cleanly) */
+                <div 
+                  ref={trayScrollContainerRef}
+                  className="p-3 overflow-y-auto max-h-60 sm:max-h-72 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 scrollbar-thin w-full"
+                >
+                  {sortedUnplacedItems.map((item, idx) => {
+                    const isHeld = heldUnplacedItem?.unplaced.sku === item.sku;
+                    const itemColor = getUnplacedItemColor(item);
+                    return (
+                      <div
+                        key={`grid-${item.sku}-${idx}`}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', item.sku);
+                          draggedUnplacedRef.current = {
                             unplaced: item,
                             rotation: 0,
                             color: itemColor
-                          });
-                          showToast(isJa 
-                            ? `「${item.name}」を選択しました。3Dコンテナ内の配置したい位置をクリックしてください` 
-                            : `Selected "${item.name}". Click in 3D view to place.`);
-                        }
-                      }}
-                      className={`shrink-0 flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-all duration-150 select-none ${
-                        isHeld
-                          ? 'bg-amber-100/90 border-amber-500 shadow-md ring-2 ring-amber-400 scale-[1.02]'
-                          : 'bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300 shadow-xs'
-                      }`}
-                      style={{ minWidth: '190px' }}
-                    >
-                      <div 
-                        className="w-5 h-5 rounded-md shrink-0 border border-black/10 flex items-center justify-center text-white shadow-2xs"
-                        style={{ backgroundColor: itemColor }}
+                          };
+                        }}
+                        onDragEnd={() => {
+                          draggedUnplacedRef.current = null;
+                          setGhostCoords(null);
+                        }}
+                        onClick={() => {
+                          if (isHeld) {
+                            cancelPlacementMode();
+                          } else {
+                            const held = {
+                              unplaced: item,
+                              rotation: 0 as const,
+                              color: itemColor
+                            };
+                            setHeldUnplacedItem(held);
+                            heldUnplacedItemRef.current = held;
+                            setIsDraggingExistingItem(null);
+                            isDraggingExistingItemRef.current = null;
+                            setInternalSelectedItem(null);
+                            activeSelectedItemRef.current = null;
+                            if (onSelectItem) onSelectItem(null);
+                            showToast(isJa 
+                              ? `「${item.name}」を選択しました。3D画面内をクリックで配置 (Esc / C でキャンセル)` 
+                              : `Selected "${item.name}". Click in 3D to place (Esc / C to cancel)`);
+                          }
+                        }}
+                        className={`flex items-center gap-2.5 p-2 rounded-lg border text-xs cursor-pointer transition-all duration-150 select-none w-full ${
+                          isHeld
+                            ? 'bg-amber-100/90 border-amber-500 shadow-md ring-2 ring-amber-400 scale-[1.01]'
+                            : 'bg-white hover:bg-slate-50 border-slate-200 hover:border-slate-300 shadow-xs'
+                        }`}
                       >
-                        <Box className="w-3 h-3" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-bold text-slate-900 truncate text-[11px]">{item.name}</span>
-                          <span className="bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded font-mono font-bold text-[10px]">
-                            x{item.count}
-                          </span>
+                        <div 
+                          className="w-5 h-5 rounded-md shrink-0 border border-black/10 flex items-center justify-center text-white shadow-2xs"
+                          style={{ backgroundColor: itemColor }}
+                        >
+                          <Box className="w-3 h-3" />
                         </div>
-                        <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1.5 mt-0.5">
-                          <span>{item.dimensions.length}×{item.dimensions.width}×{item.dimensions.height}mm</span>
-                          <span>•</span>
-                          <span>{item.weight}kg</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold text-slate-900 truncate text-[11px]">{item.name}</span>
+                            <span className="bg-amber-500 text-slate-950 px-1.5 py-0.2 rounded font-mono font-bold text-[10px]">
+                              x{item.count}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between gap-1 mt-0.5">
+                            <span className="truncate">{item.dimensions.length}×{item.dimensions.width}×{item.dimensions.height}</span>
+                            <span className={`px-1.5 py-0.2 rounded font-bold shrink-0 ${
+                              traySortOrder.startsWith('weight') 
+                                ? 'bg-amber-100 text-amber-950 border border-amber-300' 
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {item.weight}kg
+                            </span>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-slate-400 hover:text-slate-700">
+                          <Move className="w-3.5 h-3.5" />
                         </div>
                       </div>
-                      <div className="shrink-0 text-slate-400 hover:text-slate-700">
-                        <Move className="w-3.5 h-3.5" />
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
@@ -2992,6 +3570,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           </div>
         </div>
       )}
+      {/* Keyboard Shortcuts Help Modal */}
+      <ManualShortcutsHelpModal
+        isOpen={showShortcutsHelp}
+        onClose={() => setShowShortcutsHelp(false)}
+        language={language}
+      />
     </div>
   );
 };

@@ -47,6 +47,8 @@ export interface GAParameterInfo {
   bestFitnessScore?: number;
 }
 
+export type CurrencyCode = 'USD' | 'JPY' | 'EUR';
+
 export interface Container {
   id: string;
   name: string;
@@ -56,7 +58,8 @@ export interface Container {
   height: number; // mm
   maxWeight: number; // kg
   tareWeight: number; // kg
-  costEstimate?: number; // USD / JPY
+  costEstimate?: number; // USD / JPY / EUR
+  costCurrency?: CurrencyCode; // default USD
   color?: string;
   description?: string;
 }
@@ -109,6 +112,7 @@ export interface UnplacedItem {
   cargoItemId: string;
   sku: string;
   name: string;
+  color?: string;
   reason: 'exceeds_weight' | 'no_spatial_fit' | 'stacking_constraint' | 'floor_constraint';
   dimensions: { length: number; width: number; height: number };
   weight: number;

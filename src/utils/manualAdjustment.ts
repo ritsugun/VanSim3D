@@ -316,7 +316,7 @@ export function applyManualItemPlacement(
     width: placement.width,
     height: placement.height,
     weight: unplacedItem.weight,
-    color: placement.color || (matchingItem?.color || '#3b82f6'),
+    color: placement.color || unplacedItem.color || (matchingItem?.color || '#3b82f6'),
     fragile: isFragile,
     sequenceNumber: nextSeq,
     stepIndex: nextSeq,
@@ -565,7 +565,7 @@ export function applyManualItemRemove(
   const updatedUnplacedItems = currentResult.unplacedItems.map(u => {
     if (!found && ((u.cargoItemId && u.cargoItemId === itemToRemove.cargoItemId) || (u.sku && u.sku === itemToRemove.sku))) {
       found = true;
-      return { ...u, count: u.count + 1 };
+      return { ...u, color: u.color || itemToRemove.color, count: u.count + 1 };
     }
     return u;
   });
@@ -575,6 +575,7 @@ export function applyManualItemRemove(
       cargoItemId: itemToRemove.cargoItemId,
       sku: itemToRemove.sku,
       name: itemToRemove.name,
+      color: itemToRemove.color,
       reason: 'no_spatial_fit',
       dimensions: {
         length: itemToRemove.length,
@@ -692,11 +693,15 @@ export function applyManualUnloadContainer(
 
     if (existing) {
       existing.count += 1;
+      if (!existing.color && item.color) {
+        existing.color = item.color;
+      }
     } else {
       updatedUnplacedItems.push({
         cargoItemId: item.cargoItemId,
         sku: item.sku,
         name: item.name,
+        color: item.color,
         reason: 'no_spatial_fit',
         dimensions: {
           length: item.length,

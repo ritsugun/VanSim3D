@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { Container, Language, UnitSystem } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Container, Language, UnitSystem, CurrencyCode } from '../types';
 import { STANDARD_CONTAINERS } from '../data/presets';
-import { Container as ContainerIcon, Truck, Box, Plus, Check, Settings2, AlertTriangle } from 'lucide-react';
-import { formatDimensions, formatVolume, formatWeight } from '../utils/units';
+import { Container as ContainerIcon, Truck, Box, Plus, Check, Settings2, AlertTriangle, DollarSign, RotateCcw } from 'lucide-react';
+import { formatDimensions, formatVolume, formatWeight, formatCurrency, getCurrencySymbol } from '../utils/units';
 
 interface ContainerSelectorProps {
   selectedContainer: Container;
@@ -44,11 +44,69 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
     maxWeight: 20000,
     tareWeight: 2500,
     costEstimate: 1500,
+    costCurrency: 'USD',
     color: '#0284c7',
     description: language === 'ja' ? 'ユーザー定義の独自寸法コンテナ' : 'Custom user-defined dimensions'
   });
 
   const isJa = language === 'ja';
+
+  // Active default preset & cost values
+  const defaultPreset = useMemo(() => {
+    return STANDARD_CONTAINERS.find(c => c.id === selectedContainer.id);
+  }, [selectedContainer.id]);
+
+  const currentCurrency: CurrencyCode = selectedContainer.costCurrency || 'USD';
+  const currentCost = selectedContainer.costEstimate ?? (defaultPreset?.costEstimate ?? 2000);
+
+  const handleCostChange = (newCost: number) => {
+    onSelectContainer({
+      ...selectedContainer,
+      costEstimate: Math.max(0, newCost)
+    });
+  };
+
+  const handleCurrencyChange = (newCurrency: CurrencyCode) => {
+    onSelectContainer({
+      ...selectedContainer,
+      costCurrency: newCurrency
+    });
+  };
+
+  const handleResetCostToDefault = () => {
+    if (defaultPreset) {
+      onSelectContainer({
+        ...selectedContainer,
+        costEstimate: defaultPreset.costEstimate,
+        costCurrency: 'USD'
+      });
+    }
+  };
+
+  const quickRates = useMemo(() => {
+    if (currentCurrency === 'JPY') {
+      return [
+        { label: '¥250,000', value: 250000 },
+        { label: '¥350,000', value: 350000 },
+        { label: '¥500,000', value: 500000 },
+        { label: '¥600,000', value: 600000 }
+      ];
+    }
+    if (currentCurrency === 'EUR') {
+      return [
+        { label: '€1,900', value: 1900 },
+        { label: '€3,100', value: 3100 },
+        { label: '€3,350', value: 3350 },
+        { label: '€3,900', value: 3900 }
+      ];
+    }
+    return [
+      { label: '$2,100 (20GP)', value: 2100 },
+      { label: '$3,400 (40GP)', value: 3400 },
+      { label: '$3,650 (40HC)', value: 3650 },
+      { label: '$4,200 (45HC)', value: 4200 }
+    ];
+  }, [currentCurrency]);
 
   const handleCustomChange = (field: keyof Container, val: any) => {
     const updated = {
@@ -205,6 +263,117 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
         </div>
       </div>
 
+      {/* Container Freight Rate & Currency Settings */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs text-slate-800">
+        <div className="flex items-center justify-between gap-3 mb-3 pb-2.5 border-b border-slate-100 flex-wrap">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center font-bold text-sm shrink-0">
+              <DollarSign className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                {isJa ? 'コンテナ運賃・単価設定' : 'Freight Rate & Cost Settings'}
+                <span className="text-[10px] font-mono font-semibold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
+                  {selectedContainer.name}
+                </span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                {isJa 
+                  ? '1台あたりの概算運賃。積載分析や総コスト試算に即時連動します' 
+                  : 'Freight cost per container unit. Updates analytics & totals in real time'}
+              </p>
+            </div>
+          </div>
+
+          {/* Reset to default preset button if modified */}
+          {defaultPreset && (selectedContainer.costEstimate !== defaultPreset.costEstimate || (selectedContainer.costCurrency && selectedContainer.costCurrency !== 'USD')) && (
+            <button
+              type="button"
+              onClick={handleResetCostToDefault}
+              className="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg border border-slate-300 flex items-center gap-1 transition-colors cursor-pointer"
+              title={isJa ? 'プリセット標準単価に戻す' : 'Reset to default preset rate'}
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>{isJa ? `標準値に戻す ($${defaultPreset.costEstimate?.toLocaleString()})` : `Reset ($${defaultPreset.costEstimate})`}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+          {/* Currency Selector (4 cols) */}
+          <div className="sm:col-span-4">
+            <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+              {isJa ? '通貨 (Currency)' : 'Currency'}
+            </label>
+            <div className="grid grid-cols-3 gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
+              {(['USD', 'JPY', 'EUR'] as CurrencyCode[]).map(cur => (
+                <button
+                  key={cur}
+                  type="button"
+                  onClick={() => handleCurrencyChange(cur)}
+                  className={`py-1 rounded text-center transition-all cursor-pointer ${
+                    currentCurrency === cur
+                      ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {cur} ({getCurrencySymbol(cur)})
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Unit Cost Input (8 cols) */}
+          <div className="sm:col-span-8">
+            <label className="text-[11px] font-semibold text-slate-600 block mb-1">
+              {isJa ? 'コンテナ1台あたりの運賃単価' : 'Freight Rate per Container'}
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-500 text-sm pointer-events-none">
+                  {getCurrencySymbol(currentCurrency)}
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="50"
+                  value={currentCost}
+                  onChange={e => handleCostChange(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 font-mono font-bold text-slate-900 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                  placeholder="0"
+                />
+              </div>
+              <span className="text-xs text-slate-500 font-medium whitespace-nowrap">
+                / {isJa ? '台' : 'unit'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Rate Presets */}
+        <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap text-xs">
+          <span className="text-[11px] text-slate-400 font-medium">
+            {isJa ? 'クイック単価設定:' : 'Quick Presets:'}
+          </span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {quickRates.map(rate => (
+              <button
+                key={rate.value}
+                type="button"
+                onClick={() => handleCostChange(rate.value)}
+                className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors cursor-pointer border ${
+                  currentCost === rate.value
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-bold'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                {rate.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs text-slate-800">
         <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-slate-100 flex-wrap">
           <div>
@@ -291,6 +460,13 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
                         {formatWeight(cont.maxWeight, unitSystem)}
                       </span>
                     </div>
+                    <div className="flex items-center justify-between col-span-2 pt-1 border-t border-slate-100 text-[10.5px]">
+                      <span className="text-slate-400 font-semibold">{isJa ? '概算運賃' : 'Rate'}:</span>
+                      <span className="font-mono font-bold text-slate-900 flex items-center gap-1">
+                        {formatCurrency(isSelected ? currentCost : (cont.costEstimate || 2000), isSelected ? currentCurrency : 'USD')}
+                        <span className="text-slate-400 font-normal text-[10px]">/ {isJa ? '台' : 'unit'}</span>
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -307,11 +483,11 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
             </span>
             <div className="flex flex-wrap gap-1.5">
               {[
-                { name: isJa ? '2t標準トラック' : '2t Truck', l: 3100, w: 1600, h: 1800, wt: 2000 },
-                { name: isJa ? '4tウイング車' : '4t Wing Truck', l: 6200, w: 2350, h: 2400, wt: 4000 },
-                { name: isJa ? '10t大型トラック' : '10t Heavy Truck', l: 9600, w: 2380, h: 2500, wt: 13500 },
-                { name: isJa ? '10ft ミニコンテナ' : '10ft Container', l: 2800, w: 2350, h: 2390, wt: 10000 },
-                { name: isJa ? '軽バン・ハイエース' : 'Van / Hiace', l: 2800, w: 1500, h: 1300, wt: 1000 },
+                { name: isJa ? '2t標準トラック' : '2t Truck', l: 3100, w: 1600, h: 1800, wt: 2000, cost: 400 },
+                { name: isJa ? '4tウイング車' : '4t Wing Truck', l: 6200, w: 2350, h: 2400, wt: 4000, cost: 800 },
+                { name: isJa ? '10t大型トラック' : '10t Heavy Truck', l: 9600, w: 2380, h: 2500, wt: 13500, cost: 1400 },
+                { name: isJa ? '10ft ミニコンテナ' : '10ft Container', l: 2800, w: 2350, h: 2390, wt: 10000, cost: 1200 },
+                { name: isJa ? '軽バン・ハイエース' : 'Van / Hiace', l: 2800, w: 1500, h: 1300, wt: 1000, cost: 200 },
               ].map(tpl => (
                 <button
                   key={tpl.name}
@@ -323,7 +499,8 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
                       length: tpl.l,
                       width: tpl.w,
                       height: tpl.h,
-                      maxWeight: tpl.wt
+                      maxWeight: tpl.wt,
+                      costEstimate: tpl.cost
                     };
                     setCustomForm(upd);
                     onSelectContainer(upd);
@@ -360,6 +537,42 @@ export const ContainerSelector: React.FC<ContainerSelectorProps> = ({
                 onChange={e => handleCustomChange('maxWeight', Math.max(100, Number(e.target.value) || 100))}
                 className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-900 font-bold focus:border-slate-500 focus:ring-1 focus:ring-slate-500 outline-none"
               />
+            </div>
+          </div>
+
+          {/* Custom Freight Rate & Currency */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+            <div>
+              <label className="text-slate-600 font-medium block mb-1">
+                {isJa ? '運賃単価 / 台' : 'Freight Cost / Unit'}
+              </label>
+              <div className="relative">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs pointer-events-none">
+                  {getCurrencySymbol(customForm.costCurrency || 'USD')}
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="50"
+                  value={customForm.costEstimate ?? 1500}
+                  onChange={e => handleCustomChange('costEstimate', Math.max(0, Number(e.target.value) || 0))}
+                  className="w-full bg-white border border-slate-300 rounded-lg pl-7 pr-2.5 py-1.5 text-slate-900 font-bold font-mono focus:border-slate-500 focus:ring-1 focus:ring-slate-500 outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-slate-600 font-medium block mb-1">
+                {isJa ? '通貨 (Currency)' : 'Currency'}
+              </label>
+              <select
+                value={customForm.costCurrency || 'USD'}
+                onChange={e => handleCustomChange('costCurrency', e.target.value as CurrencyCode)}
+                className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-slate-900 font-medium focus:border-slate-500 focus:ring-1 focus:ring-slate-500 outline-none cursor-pointer"
+              >
+                <option value="USD">USD ($)</option>
+                <option value="JPY">JPY (¥)</option>
+                <option value="EUR">EUR (€)</option>
+              </select>
             </div>
           </div>
 

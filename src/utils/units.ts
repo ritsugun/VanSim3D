@@ -154,3 +154,21 @@ export function formatCoordinates(
     unit: 'mm'
   };
 }
+
+/**
+ * Currency formatting utilities
+ */
+export function getCurrencySymbol(currency: string = 'USD'): string {
+  switch (currency) {
+    case 'JPY': return '¥';
+    case 'EUR': return '€';
+    default: return '$';
+  }
+}
+
+export function formatCurrency(amount: number, currency: string = 'USD'): string {
+  const symbol = getCurrencySymbol(currency);
+  const rounded = Math.round(amount);
+  return `${symbol}${rounded.toLocaleString()}`;
+}
+

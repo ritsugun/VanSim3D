@@ -64,12 +64,54 @@ export default function App() {
   } | null>(null);
 
   const handleAllClearFromApp = () => {
-    if (cargoList.length === 0) return;
     setCargoList([]);
+    setManifestReplayMeta(null);
+    setSelectedItem(null);
+    setUndoStack([]);
+    setRedoStack([]);
+    setActiveContainerIndex(0);
+    setIsManualMode(false);
+
+    // Immediately clear packing result to blank slate so unplaced and manifest banners vanish
+    const countParam = containerCountMode === 'auto' ? 'auto' : containerCount;
+    const emptyResult = run3DPackingOptimizer(selectedContainer, [], effectiveAlgorithm, countParam, effectiveGaConfig);
+    setPackingResult(emptyResult);
     setShowGlobalClearModal(false);
   };
 
   const isJa = language === 'ja';
+
+  // Single-key shortcut 'M' to toggle between Manual Mode and Normal Mode
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is currently typing in an input, textarea, select, or contenteditable
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      // Ignore if modifier keys are pressed (Ctrl, Cmd, Alt)
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        return;
+      }
+
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        // When on 3D tab, ContainerViewer3D handles the toggle with toast notifications and placement cleanup
+        if (activeTab !== '3d') {
+          setIsManualMode(prev => !prev);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [activeTab]);
 
   // Compute Auto-Selected Best Algorithm across all 7 strategies ONLY when Auto Mode is enabled
   const autoBenchmarkResult = useMemo(() => {
@@ -140,9 +182,19 @@ export default function App() {
     const targetIdx = placement.containerIndex !== undefined 
       ? placement.containerIndex 
       : (activeContainerIndex === 'all' ? 1 : activeContainerIndex);
-    const next = applyManualItemPlacement(packingResultRef.current, selectedContainer, targetIdx, unplacedItem, placement);
+    const resolvedColor = placement.color 
+      || unplacedItem.color 
+      || cargoList.find(c => (unplacedItem.cargoItemId && c.id === unplacedItem.cargoItemId) || (unplacedItem.sku && c.sku === unplacedItem.sku))?.color 
+      || '#3b82f6';
+    const next = applyManualItemPlacement(
+      packingResultRef.current, 
+      selectedContainer, 
+      targetIdx, 
+      { ...unplacedItem, color: unplacedItem.color || resolvedColor }, 
+      { ...placement, color: resolvedColor }
+    );
     recordManualAdjustment(next);
-  }, [selectedContainer, activeContainerIndex, recordManualAdjustment]);
+  }, [selectedContainer, activeContainerIndex, recordManualAdjustment, cargoList]);
 
   const handleManualMoveItem = useCallback((itemId: string, newCoords: { x: number; y: number; z: number; length?: number; width?: number; height?: number; rotationIndex?: number }) => {
     const next = applyManualItemMove(packingResultRef.current, selectedContainer, itemId, newCoords);
@@ -378,7 +430,11 @@ export default function App() {
         onOpenBenchmarkModal={() => setIsBenchmarkModalOpen(true)}
         onOpenImportManifest={() => setIsManifestModalOpen(true)}
         onReoptimize={handleReoptimize}
-        onAllClear={cargoList.length > 0 ? () => setShowGlobalClearModal(true) : undefined}
+        onAllClear={
+          (cargoList.length > 0 || manifestReplayMeta !== null || packingResult.packedItems.length > 0 || packingResult.unplacedItems.length > 0)
+            ? () => setShowGlobalClearModal(true)
+            : undefined
+        }
         isCalculating={isCalculating}
         showCalculatingPopup={showCalculatingPopup}
         showAlgorithmPanel={showAlgorithmPanel}
@@ -714,6 +770,7 @@ export default function App() {
               overallMetrics={packingResult.overallMetrics}
               activeContainerIndex={activeContainerIndex}
               onSelectContainerIndex={setActiveContainerIndex}
+              onUpdateContainer={setSelectedContainer}
             />
           </div>
         )}
@@ -841,6 +898,7 @@ export default function App() {
               activeContainerIndex={activeContainerIndex}
               onSelectContainerIndex={setActiveContainerIndex}
               packedItems={packingResult.packedItems}
+              onUpdateContainer={setSelectedContainer}
             />
 
             <div className="w-full h-[480px]">
@@ -855,6 +913,7 @@ export default function App() {
                 language={language}
                 onSelectItem={setSelectedItem}
                 selectedItem={selectedItem}
+                cargoList={cargoList}
               />
             </div>
           </div>
@@ -958,8 +1017,14 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {isJa 
-                    ? `現在登録されている ${cargoList.length} 種類の貨物（合計 ${cargoList.reduce((s, c) => s + c.quantity, 0).toLocaleString()} 個）を全件消去します。` 
-                    : `This will remove all ${cargoList.length} items (${cargoList.reduce((s, c) => s + c.quantity, 0).toLocaleString()} total units) from the cargo list.`}
+                    ? (manifestReplayMeta 
+                        ? `外部マニフェスト（${manifestReplayMeta.fileName}）の再現データおよびすべての登録貨物を完全に消去し、初期状態にリセットします。`
+                        : cargoList.length > 0
+                          ? `現在登録されている ${cargoList.length} 種類の貨物（合計 ${cargoList.reduce((s, c) => s + c.quantity, 0).toLocaleString()} 個）および積載結果を全件消去します。`
+                          : `すべての貨物および積載データを完全に消去し、初期状態にリセットします。`)
+                    : (manifestReplayMeta
+                        ? `This will clear the external manifest (${manifestReplayMeta.fileName}), all cargo items, and reset the 3D packing results to a clean state.`
+                        : `This will remove all cargo items and reset the 3D packing results to a clean state.`)}
                 </p>
               </div>
             </div>

@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { PackingMetrics, Container, Language, UnitSystem, UnplacedItem, ContainerLoad, OverallPackingMetrics, PackedItem } from '../types';
+import { PackingMetrics, Container, Language, UnitSystem, UnplacedItem, ContainerLoad, OverallPackingMetrics, PackedItem, CurrencyCode } from '../types';
 import { 
   Gauge, Scale, Crosshair, AlertTriangle, CheckCircle2, 
   Truck, DollarSign, PackageCheck, Layers, Grid3X3,
-  Box, ChevronRight, PieChart, ShieldAlert, Check
+  Box, ChevronRight, PieChart, ShieldAlert, Check, Pencil, X
 } from 'lucide-react';
-import { formatVolume, formatWeight, formatLength } from '../utils/units';
+import { formatVolume, formatWeight, formatLength, formatCurrency, getCurrencySymbol } from '../utils/units';
 
 interface PackingAnalyticsProps {
   metrics: PackingMetrics;
@@ -18,6 +18,7 @@ interface PackingAnalyticsProps {
   activeContainerIndex?: number | 'all';
   onSelectContainerIndex?: (index: number | 'all') => void;
   packedItems?: PackedItem[];
+  onUpdateContainer?: (container: Container) => void;
 }
 
 interface CargoBreakdownItem {
@@ -44,10 +45,15 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
   overallMetrics,
   activeContainerIndex = 1,
   onSelectContainerIndex,
-  packedItems = []
+  packedItems = [],
+  onUpdateContainer
 }) => {
   const isJa = language === 'ja';
   const [selectedBreakdownTab, setSelectedBreakdownTab] = useState<number | 'all'>('all');
+
+  const [isEditingCost, setIsEditingCost] = useState(false);
+  const [editCostVal, setEditCostVal] = useState(container.costEstimate ?? 2000);
+  const [editCurrencyVal, setEditCurrencyVal] = useState<CurrencyCode>(container.costCurrency ?? 'USD');
 
   const hasMultipleContainers = Boolean(containers && containers.length > 1);
 
@@ -239,7 +245,9 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
               </div>
               <div className="bg-white px-3 py-1.5 rounded-lg border border-slate-300">
                 <span className="text-slate-500 block text-[10px] uppercase font-semibold">{isJa ? '全台総輸送コスト' : 'Total Fleet Cost'}</span>
-                <span className="font-mono font-bold text-slate-900 text-sm">${overallMetrics.totalCostEstimate.toLocaleString()}</span>
+                <span className="font-mono font-bold text-slate-900 text-sm">
+                  {formatCurrency(overallMetrics.totalCostEstimate, activeContainer.costCurrency || container.costCurrency || 'USD')}
+                </span>
               </div>
             </div>
           </div>
@@ -451,7 +459,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
 
         {/* Shipping Cost & Efficiency */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
             <span className="text-slate-500 font-medium flex items-center gap-1.5">
               <DollarSign className="w-4 h-4 text-slate-800" />
               <span>{isJa ? '概算輸送コスト' : 'Estimated Cost'}</span>
@@ -461,23 +469,113 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                 </span>
               )}
             </span>
-            <span className="font-mono text-slate-900 font-bold text-base">
-              ${hasMultipleContainers
-                ? (activeContainer.costEstimate || 2000).toLocaleString()
-                : ((container.costEstimate || 2000) * metrics.containersNeeded).toLocaleString()}
-            </span>
+            {onUpdateContainer && !isEditingCost && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditCostVal(activeContainer.costEstimate ?? (container.costEstimate ?? 2000));
+                  setEditCurrencyVal(activeContainer.costCurrency || container.costCurrency || 'USD');
+                  setIsEditingCost(true);
+                }}
+                className="text-[10.5px] text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded border border-slate-300 flex items-center gap-1 transition-colors cursor-pointer"
+                title={isJa ? '単価・通貨を変更' : 'Edit rate & currency'}
+              >
+                <Pencil className="w-3 h-3" />
+                <span>{isJa ? '単価変更' : 'Edit'}</span>
+              </button>
+            )}
           </div>
-          <p className="text-[11px] text-slate-500 my-1">
-            {isJa 
-              ? `CBM単価: 約 $${(((activeContainer.costEstimate || 2000)) / Math.max(1, activeMetrics.packedVolumeCbm)).toFixed(1)} / m³` 
-              : `Cost per CBM: $${(((activeContainer.costEstimate || 2000)) / Math.max(1, activeMetrics.packedVolumeCbm)).toFixed(1)} / m³`}
-          </p>
+
+          {isEditingCost ? (
+            <div className="space-y-2 py-1">
+              <div className="flex items-center gap-1">
+                <div className="grid grid-cols-3 gap-0.5 bg-slate-100 p-0.5 rounded text-[11px] font-semibold">
+                  {(['USD', 'JPY', 'EUR'] as CurrencyCode[]).map(cur => (
+                    <button
+                      key={cur}
+                      type="button"
+                      onClick={() => setEditCurrencyVal(cur)}
+                      className={`px-1 py-0.5 rounded cursor-pointer ${
+                        editCurrencyVal === cur ? 'bg-white text-slate-900 font-bold shadow-2xs' : 'text-slate-500'
+                      }`}
+                    >
+                      {cur}
+                    </button>
+                  ))}
+                </div>
+                <div className="relative flex-1 min-w-[70px]">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-xs pointer-events-none">
+                    {getCurrencySymbol(editCurrencyVal)}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={editCostVal}
+                    onChange={e => setEditCostVal(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-full bg-white border border-slate-300 rounded px-2 pl-6 py-1 font-mono font-bold text-xs text-slate-900 focus:outline-none focus:border-slate-500"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onUpdateContainer) {
+                      onUpdateContainer({
+                        ...container,
+                        costEstimate: Math.max(0, editCostVal),
+                        costCurrency: editCurrencyVal
+                      });
+                    }
+                    setIsEditingCost(false);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white p-1 rounded cursor-pointer transition-colors"
+                  title={isJa ? '保存' : 'Save'}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingCost(false)}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 p-1 rounded cursor-pointer transition-colors"
+                  title={isJa ? 'キャンセル' : 'Cancel'}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400">
+                {isJa ? 'コンテナ1台あたりの運賃単価' : 'Freight cost per container unit'}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-baseline justify-between">
+                <span className="font-mono text-slate-900 font-bold text-base">
+                  {formatCurrency(
+                    hasMultipleContainers
+                      ? (activeContainer.costEstimate || 2000)
+                      : ((container.costEstimate || 2000) * metrics.containersNeeded),
+                    activeContainer.costCurrency || container.costCurrency || 'USD'
+                  )}
+                </span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  {formatCurrency(activeContainer.costEstimate || 2000, activeContainer.costCurrency || container.costCurrency || 'USD')} / {isJa ? '台' : 'unit'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 my-1">
+                {isJa 
+                  ? `CBM単価: 約 ${formatCurrency(((activeContainer.costEstimate || 2000)) / Math.max(1, activeMetrics.packedVolumeCbm), activeContainer.costCurrency || container.costCurrency || 'USD')} / m³` 
+                  : `Cost per CBM: ${formatCurrency(((activeContainer.costEstimate || 2000)) / Math.max(1, activeMetrics.packedVolumeCbm), activeContainer.costCurrency || container.costCurrency || 'USD')} / m³`}
+              </p>
+            </>
+          )}
+
           <div className="border-t border-slate-100 pt-2 flex items-center justify-between text-[10px] text-slate-400">
             {hasMultipleContainers && overallMetrics ? (
               <>
                 <span>{isJa ? '全編成コスト' : 'Fleet Total'}:</span>
                 <span className="font-mono text-slate-900 font-bold">
-                  ${overallMetrics.totalCostEstimate?.toLocaleString()} ({overallMetrics.totalContainersCount} {isJa ? '台' : 'units'})
+                  {formatCurrency(overallMetrics.totalCostEstimate, activeContainer.costCurrency || container.costCurrency || 'USD')} ({overallMetrics.totalContainersCount} {isJa ? '台' : 'units'})
                 </span>
               </>
             ) : (

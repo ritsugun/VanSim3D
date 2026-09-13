@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { CargoItem, Container, UnitSystem, Language } from '../types';
 import { SAMPLE_CARGO_PRESETS, CargoPreset, SAMPLE_CSV_TEMPLATE } from '../data/presets';
 import { 
-  Plus, Trash2, Upload, Download, Sparkles, 
+  Plus, Trash2, FileInput, FileOutput, Sparkles, 
   ShieldAlert, Check, FileSpreadsheet, FileDown,
   Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers, ArrowDownToLine,
   AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, ChevronDown
@@ -627,7 +627,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 cursor-pointer font-semibold flex items-center gap-1 transition-colors text-xs shadow-2xs shrink-0"
             title={isJa ? 'Excelファイル (.xlsx, .xls) または CSVファイルから一括取込' : 'Import from Excel (.xlsx/.xls) or CSV'}
           >
-            <Upload className="w-3.5 h-3.5 text-emerald-600" />
+            <FileInput className="w-3.5 h-3.5 text-emerald-600" />
             <span>{isJa ? '取込' : 'Import'}</span>
             <input 
               type="file" 
@@ -650,7 +650,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               title={isJa ? '貨物リストをExcel (.xlsx) または CSVで出力保存' : 'Export Cargo List as Excel or CSV'}
               className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs cursor-pointer shadow-2xs"
             >
-              <Download className="w-3.5 h-3.5 text-blue-600" />
+              <FileOutput className="w-3.5 h-3.5 text-blue-600" />
               <span>{isJa ? '保存' : 'Export'}</span>
               <ChevronDown className="w-3 h-3 text-slate-400" />
             </button>
@@ -682,7 +682,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                   }}
                   className="w-full text-left px-3 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
                 >
-                  <Download className="w-4 h-4 text-blue-600 shrink-0" />
+                  <FileOutput className="w-4 h-4 text-blue-600 shrink-0" />
                   <div>
                     <div className="font-semibold text-slate-800">{isJa ? 'CSV保存' : 'Export CSV'}</div>
                     <div className="text-[10px] text-slate-400">.csv (カンマ区切り)</div>
@@ -1230,7 +1230,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                 className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold flex items-center gap-1.5 text-xs cursor-pointer shadow-2xs transition-colors"
                 title={isJa ? 'Excel (.xlsx/.xls) または CSVファイルから一括取込' : 'Import from Excel or CSV'}
               >
-                <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                <FileInput className="w-3.5 h-3.5 text-emerald-600" />
                 <span>{isJa ? 'Excel / CSV取込' : 'Import Excel / CSV'}</span>
                 <input 
                   type="file" 
