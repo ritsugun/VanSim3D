@@ -96,7 +96,8 @@ export function calculateSupportHeight(
   length: number,
   width: number,
   existingItems: PackedItem[],
-  ignoreItemId?: string
+  ignoreItemId?: string,
+  maxAllowedZ?: number
 ): number {
   let highestZ = 0;
 
@@ -109,6 +110,9 @@ export function calculateSupportHeight(
 
     if (overlapX && overlapY) {
       const topZ = item.z + item.height;
+      if (maxAllowedZ !== undefined && topZ > maxAllowedZ) {
+        continue;
+      }
       if (topZ > highestZ) {
         highestZ = topZ;
       }
@@ -116,6 +120,46 @@ export function calculateSupportHeight(
   }
 
   return highestZ;
+}
+
+/**
+ * Calculates the landing Z height when dropping an existing item down under gravity.
+ * Gravity only pulls downwards: it only considers support surfaces (floor at Z=0 or top of underlying items)
+ * that are strictly at or below the item's current position (otherTop <= item.z + tolerance).
+ * Never launches the item upward, and never exceeds the container ceiling.
+ */
+export function calculateDropSupportHeight(
+  item: PackedItem,
+  existingItems: PackedItem[],
+  containerHeight?: number
+): number {
+  let highestSupportZ = 0; // Container floor is default support at Z = 0
+
+  for (const other of existingItems) {
+    if (other.id === item.id) continue;
+
+    // Check if horizontal bounding box overlaps
+    const overlapX = item.x < (other.x + other.length) && (item.x + item.length) > other.x;
+    const overlapY = item.y < (other.y + other.width) && (item.y + item.width) > other.y;
+
+    if (overlapX && overlapY) {
+      const otherTop = other.z + other.height;
+      // Support must be at or below current item's bottom (+ 2mm tolerance for floating-point precision)
+      if (otherTop <= item.z + 2) {
+        if (otherTop > highestSupportZ) {
+          highestSupportZ = otherTop;
+        }
+      }
+    }
+  }
+
+  // Ensure landing position never pushes the item outside container ceiling
+  if (containerHeight !== undefined && containerHeight > 0) {
+    const maxAllowedZ = Math.max(0, containerHeight - item.height);
+    return Math.max(0, Math.min(highestSupportZ, maxAllowedZ));
+  }
+
+  return highestSupportZ;
 }
 
 /**
@@ -274,6 +318,131 @@ export function findMaxNonCollidingPosition(
     blocked: blocked || (bestX === current.x && bestY === current.y && bestZ === current.z),
     collidingItem: initialCollision.collidingItem
   };
+}
+
+/**
+ * Finds the deepest back-left candidate position in the container for an item.
+ * Container coordinate convention:
+ * - X: 0 is the innermost back wall (奥), container.length is the front cargo doors (手前).
+ * - Y: container.width - item.width is the leftmost wall (左) from viewer perspective (+Y is Left), 0 is right wall.
+ * - Z: 0 is the floor (床), with gravity support on floor or top of other boxes.
+ *
+ * This function searches for the most optimal placement that is as far back (min X),
+ * as far left (max Y), and as low as possible (stable support Z), without collision or floating.
+ */
+export function findDeepestBackLeftPosition(
+  targetItem: { id: string; length: number; width: number; height: number; x: number; y: number; z: number },
+  existingItems: PackedItem[],
+  container: Container,
+  gridSnapMm: number = 20
+): { x: number; y: number; z: number } | null {
+  const itemLen = targetItem.length;
+  const itemWid = targetItem.width;
+  const itemHei = targetItem.height;
+
+  const maxX = container.length - itemLen;
+  const maxY = container.width - itemWid;
+  const maxZ = container.height - itemHei;
+
+  if (maxX < 0 || maxY < 0 || maxZ < 0) {
+    return null; // Item too large for container
+  }
+
+  const otherItems = existingItems.filter(p => p.id !== targetItem.id);
+
+  // Candidate X coordinates: Back wall (0), and flush against the front/rear face of other boxes
+  const candidateXs = new Set<number>();
+  candidateXs.add(0);
+  for (const item of otherItems) {
+    const xAfter = item.x + item.length;
+    if (xAfter >= 0 && xAfter <= maxX) candidateXs.add(xAfter);
+    const xBefore = item.x - itemLen;
+    if (xBefore >= 0 && xBefore <= maxX) candidateXs.add(xBefore);
+  }
+  // Also include current item X and regular steps
+  candidateXs.add(Math.min(maxX, Math.max(0, targetItem.x)));
+
+  // Candidate Y coordinates: Leftmost wall (maxY = container.width - itemWid), and flush against other boxes
+  const candidateYs = new Set<number>();
+  candidateYs.add(maxY); // Left wall
+  for (const item of otherItems) {
+    const yLeftAfter = item.y + item.width;
+    if (yLeftAfter >= 0 && yLeftAfter <= maxY) candidateYs.add(yLeftAfter);
+    const yRightBefore = item.y - itemWid;
+    if (yRightBefore >= 0 && yRightBefore <= maxY) candidateYs.add(yRightBefore);
+  }
+  // Also include current item Y
+  candidateYs.add(Math.min(maxY, Math.max(0, targetItem.y)));
+
+  // Sort candidate X ascending (0 = deepest back first)
+  const sortedXs = Array.from(candidateXs).sort((a, b) => a - b);
+  // Sort candidate Y descending (maxY = leftmost first)
+  const sortedYs = Array.from(candidateYs).sort((a, b) => b - a);
+
+  // If candidate grid is too sparse, supplement with grid snap steps near 0 and maxY
+  const snapStep = Math.max(20, gridSnapMm > 0 ? gridSnapMm : 50);
+  for (let x = 0; x <= Math.min(maxX, 1200); x += snapStep) {
+    candidateXs.add(x);
+  }
+  for (let y = maxY; y >= Math.max(0, maxY - 1200); y -= snapStep) {
+    candidateYs.add(y);
+  }
+
+  const allSortedXs = Array.from(candidateXs).sort((a, b) => a - b);
+  const allSortedYs = Array.from(candidateYs).sort((a, b) => b - a);
+
+  let bestSpot: { x: number; y: number; z: number; score: number } | null = null;
+
+  for (const candX of allSortedXs) {
+    if (candX < 0 || candX > maxX) continue;
+    // Early cutoff: if we already found a valid spot with smaller X and higher Y, we can prune
+    if (bestSpot && candX > bestSpot.x + 300) {
+      break;
+    }
+
+    for (const candY of allSortedYs) {
+      if (candY < 0 || candY > maxY) continue;
+
+      // Calculate support height Z at this (candX, candY)
+      const candZ = calculateSupportHeight(candX, candY, itemLen, itemWid, otherItems, targetItem.id, maxZ);
+      if (candZ > maxZ) continue;
+
+      // Verify no collision in 3D
+      const col = check3DItemCollision(candX, candY, candZ, itemLen, itemWid, itemHei, otherItems, targetItem.id, 0.5);
+      if (col.hasCollision) continue;
+
+      // Score: heavily prioritize lowest X (innermost back), highest Y (leftmost), then lowest Z (stable bottom)
+      // Normalizing components:
+      // X penalty: candX / container.length * 10000 (lower X is much better)
+      // Y penalty: (maxY - candY) / container.width * 5000 (higher Y = leftmost is much better)
+      // Z penalty: candZ / container.height * 2000 (lower Z is better)
+      const score = (candX * 10) + ((maxY - candY) * 5) + (candZ * 2);
+
+      if (!bestSpot || score < bestSpot.score) {
+        bestSpot = {
+          x: candX,
+          y: candY,
+          z: candZ,
+          score
+        };
+
+        // If perfect corner spot (X=0, Y=maxY, Z=0) is found, return immediately
+        if (candX === 0 && candY === maxY && candZ === 0) {
+          return { x: 0, y: maxY, z: 0 };
+        }
+      }
+    }
+  }
+
+  if (bestSpot) {
+    return {
+      x: bestSpot.x,
+      y: bestSpot.y,
+      z: bestSpot.z
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -788,4 +957,248 @@ export function applyManualUnloadContainer(
     manualAdjustmentsCount: (currentResult.manualAdjustmentsCount || 0) + 1
   };
 }
+
+/**
+ * Result of magnetic edge snapping
+ */
+export interface MagneticSnapCandidate {
+  x: number;
+  y: number;
+  z: number;
+  isSnappedX: boolean;
+  isSnappedY: boolean;
+  snappedItem?: PackedItem;
+  snapType?: 'adjacent_face' | 'edge_align' | 'wall';
+  snappedEdgeDescription?: string;
+  snappedDistanceX?: number;
+  snappedDistanceY?: number;
+  guideLines?: Array<{
+    start: [number, number, number]; // in meters in container coordinates
+    end: [number, number, number];   // in meters
+    axis: 'x' | 'y';
+  }>;
+}
+
+/**
+ * Applies magnetic edge snapping to draw an item toward adjacent cargo edges, aligned edges,
+ * or container walls when within a specific distance threshold (e.g. 75mm).
+ * Rigorously checks 3D AABB collisions so snapping never results in overlapping items.
+ */
+export function applyMagneticEdgeSnap(
+  rawX: number,
+  rawY: number,
+  length: number,
+  width: number,
+  height: number,
+  existingItems: PackedItem[],
+  container: Container,
+  options?: {
+    thresholdMm?: number;
+    ignoreItemId?: string;
+    snapToAdjacentCargo?: boolean;
+    snapToWalls?: boolean;
+    snapToAlignments?: boolean;
+  }
+): MagneticSnapCandidate {
+  const thresholdMm = options?.thresholdMm ?? 75;
+  const ignoreItemId = options?.ignoreItemId;
+  const snapToAdjacentCargo = options?.snapToAdjacentCargo ?? true;
+  const snapToWalls = options?.snapToWalls ?? true;
+  const snapToAlignments = options?.snapToAlignments ?? true;
+
+  if (thresholdMm <= 0) {
+    const defaultZ = calculateSupportHeight(rawX, rawY, length, width, existingItems, ignoreItemId);
+    return {
+      x: rawX,
+      y: rawY,
+      z: defaultZ,
+      isSnappedX: false,
+      isSnappedY: false
+    };
+  }
+
+  interface AxisSnapTarget {
+    val: number;
+    dist: number;
+    type: 'adjacent_face' | 'edge_align' | 'wall';
+    otherItem?: PackedItem;
+    priority: number;
+    description: string;
+  }
+
+  const xTargets: AxisSnapTarget[] = [];
+  const yTargets: AxisSnapTarget[] = [];
+
+  const addXTarget = (val: number, type: 'adjacent_face' | 'edge_align' | 'wall', priority: number, desc: string, other?: PackedItem) => {
+    if (val < -1 || val + length > container.length + 1) return;
+    const clampedVal = Math.max(0, Math.min(container.length - length, Math.round(val)));
+    const dist = Math.abs(rawX - clampedVal);
+    if (dist <= thresholdMm) {
+      xTargets.push({ val: clampedVal, dist, type, priority, description: desc, otherItem: other });
+    }
+  };
+
+  const addYTarget = (val: number, type: 'adjacent_face' | 'edge_align' | 'wall', priority: number, desc: string, other?: PackedItem) => {
+    if (val < -1 || val + width > container.width + 1) return;
+    const clampedVal = Math.max(0, Math.min(container.width - width, Math.round(val)));
+    const dist = Math.abs(rawY - clampedVal);
+    if (dist <= thresholdMm) {
+      yTargets.push({ val: clampedVal, dist, type, priority, description: desc, otherItem: other });
+    }
+  };
+
+  // 1. Cargo edge targets
+  if (snapToAdjacentCargo) {
+    for (const other of existingItems) {
+      if (ignoreItemId && other.id === ignoreItemId) continue;
+
+      // Check proximity in perpendicular axis
+      const nearbyY = (rawY < other.y + other.width + thresholdMm + 25) && (rawY + width > other.y - thresholdMm - 25);
+      const nearbyX = (rawX < other.x + other.length + thresholdMm + 25) && (rawX + length > other.x - thresholdMm - 25);
+
+      // X: Adjacent faces (flush contact against other in X)
+      if (nearbyY) {
+        // Place immediately behind other
+        addXTarget(other.x + other.length, 'adjacent_face', 1, `Flush against ${other.name}`, other);
+        // Place immediately in front of other
+        addXTarget(other.x - length, 'adjacent_face', 1, `Flush in front of ${other.name}`, other);
+
+        // Edge alignments in X (collinear front or back edges)
+        if (snapToAlignments) {
+          addXTarget(other.x, 'edge_align', 2, `Align front with ${other.name}`, other);
+          addXTarget(other.x + other.length - length, 'edge_align', 2, `Align rear with ${other.name}`, other);
+        }
+      }
+
+      // Y: Adjacent faces (flush contact against other in Y)
+      if (nearbyX) {
+        // Place immediately beside other (+Y face)
+        addYTarget(other.y + other.width, 'adjacent_face', 1, `Flush beside ${other.name}`, other);
+        // Place immediately beside other (-Y face)
+        addYTarget(other.y - width, 'adjacent_face', 1, `Flush beside ${other.name}`, other);
+
+        // Edge alignments in Y (collinear left or right edges)
+        if (snapToAlignments) {
+          addYTarget(other.y, 'edge_align', 2, `Align left with ${other.name}`, other);
+          addYTarget(other.y + other.width - width, 'edge_align', 2, `Align right with ${other.name}`, other);
+        }
+      }
+    }
+  }
+
+  // 2. Container Wall Targets
+  if (snapToWalls) {
+    addXTarget(0, 'wall', 3, 'Container front wall (X=0)');
+    addXTarget(container.length - length, 'wall', 3, 'Container rear wall');
+    addYTarget(0, 'wall', 3, 'Container left wall (Y=0)');
+    addYTarget(container.width - width, 'wall', 3, 'Container right wall');
+  }
+
+  const sortTargets = (a: AxisSnapTarget, b: AxisSnapTarget) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.dist - b.dist;
+  };
+
+  const uniqueXTargets = xTargets.sort(sortTargets).filter((t, i, arr) => arr.findIndex(o => o.val === t.val) === i);
+  const uniqueYTargets = yTargets.sort(sortTargets).filter((t, i, arr) => arr.findIndex(o => o.val === t.val) === i);
+
+  // Test combinations: dual axis first, then single axis, then raw fallback
+  const pairsToTest: Array<{
+    candX: number;
+    candY: number;
+    targetX?: AxisSnapTarget;
+    targetY?: AxisSnapTarget;
+  }> = [];
+
+  const topX = uniqueXTargets.slice(0, 4);
+  const topY = uniqueYTargets.slice(0, 4);
+
+  for (const tx of topX) {
+    for (const ty of topY) {
+      pairsToTest.push({ candX: tx.val, candY: ty.val, targetX: tx, targetY: ty });
+    }
+  }
+
+  for (const tx of topX) {
+    pairsToTest.push({ candX: tx.val, candY: rawY, targetX: tx });
+  }
+  for (const ty of topY) {
+    pairsToTest.push({ candX: rawX, candY: ty.val, targetY: ty });
+  }
+
+  pairsToTest.push({ candX: rawX, candY: rawY });
+
+  for (const pair of pairsToTest) {
+    const testX = Math.max(0, Math.min(container.length - length, pair.candX));
+    const testY = Math.max(0, Math.min(container.width - width, pair.candY));
+    const testZ = calculateSupportHeight(testX, testY, length, width, existingItems, ignoreItemId);
+
+    const bounds = checkContainerBounds(testX, testY, testZ, length, width, height, container);
+    if (!bounds.isValid) continue;
+
+    const collision = check3DItemCollision(testX, testY, testZ, length, width, height, existingItems, ignoreItemId);
+    if (collision.hasCollision) continue;
+
+    const fragile = isRestingOnFragile(testX, testY, testZ, length, width, existingItems, ignoreItemId);
+    if (fragile) continue;
+
+    const isSnappedX = pair.targetX !== undefined;
+    const isSnappedY = pair.targetY !== undefined;
+    const mainTarget = pair.targetX || pair.targetY;
+
+    const guideLines: Array<{
+      start: [number, number, number];
+      end: [number, number, number];
+      axis: 'x' | 'y';
+    }> = [];
+
+    if (pair.targetX && pair.targetX.otherItem) {
+      const other = pair.targetX.otherItem;
+      const contactYMin = Math.max(testY, other.y);
+      const contactYMax = Math.min(testY + width, other.y + other.width);
+      const contactEdgeX = pair.targetX.val === other.x + other.length ? testX : (testX + length);
+      guideLines.push({
+        start: [contactEdgeX / 1000, testZ / 1000, contactYMin / 1000],
+        end: [contactEdgeX / 1000, testZ / 1000, Math.max(contactYMax, contactYMin + 60) / 1000],
+        axis: 'x'
+      });
+    }
+
+    if (pair.targetY && pair.targetY.otherItem) {
+      const other = pair.targetY.otherItem;
+      const contactXMin = Math.max(testX, other.x);
+      const contactXMax = Math.min(testX + length, other.x + other.length);
+      const contactEdgeY = pair.targetY.val === other.y + other.width ? testY : (testY + width);
+      guideLines.push({
+        start: [contactXMin / 1000, testZ / 1000, contactEdgeY / 1000],
+        end: [Math.max(contactXMax, contactXMin + 60) / 1000, testZ / 1000, contactEdgeY / 1000],
+        axis: 'y'
+      });
+    }
+
+    return {
+      x: testX,
+      y: testY,
+      z: testZ,
+      isSnappedX,
+      isSnappedY,
+      snappedItem: mainTarget?.otherItem,
+      snapType: mainTarget?.type,
+      snappedEdgeDescription: mainTarget?.description,
+      snappedDistanceX: pair.targetX?.dist,
+      snappedDistanceY: pair.targetY?.dist,
+      guideLines
+    };
+  }
+
+  const defaultZ = calculateSupportHeight(rawX, rawY, length, width, existingItems, ignoreItemId);
+  return {
+    x: rawX,
+    y: rawY,
+    z: defaultZ,
+    isSnappedX: false,
+    isSnappedY: false
+  };
+}
+
 

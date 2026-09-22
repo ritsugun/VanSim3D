@@ -13,9 +13,20 @@ export const CBM_TO_CFT = 35.3146667;
 
 /**
  * Format 3D Box Dimensions (L × W × H)
- * In Metric: shows mm (and m for large items/containers)
+ * In Metric: unified to meters (m)
  * In Imperial: shows in (and ft for large items/containers)
  */
+export function formatMeters(valMm: number, forceDecimals?: number): string {
+  if (typeof forceDecimals === 'number') {
+    return (valMm / 1000).toFixed(forceDecimals);
+  }
+  const m = valMm / 1000;
+  if (Math.round(valMm) % 10 !== 0) {
+    return (Math.round(m * 1000) / 1000).toFixed(3);
+  }
+  return m.toFixed(2);
+}
+
 export function formatDimensions(
   lengthMm: number,
   widthMm: number,
@@ -37,19 +48,12 @@ export function formatDimensions(
     return `${lIn} × ${wIn} × ${hIn} in`;
   }
 
-  // Metric
-  const lMm = Math.round(lengthMm).toLocaleString();
-  const wMm = Math.round(widthMm).toLocaleString();
-  const hMm = Math.round(heightMm).toLocaleString();
+  // Metric: All dimensions unified to meters (m)
+  const lM = formatMeters(lengthMm);
+  const wM = formatMeters(widthMm);
+  const hM = formatMeters(heightMm);
 
-  if (!compact && (lengthMm >= 1000 || widthMm >= 1000 || heightMm >= 1000)) {
-    const lM = (lengthMm / 1000).toFixed(2);
-    const wM = (widthMm / 1000).toFixed(2);
-    const hM = (heightMm / 1000).toFixed(2);
-    return `${lMm} × ${wMm} × ${hMm} mm (${lM} × ${wM} × ${hM} m)`;
-  }
-
-  return `${lMm} × ${wMm} × ${hMm} mm`;
+  return `${lM} × ${wM} × ${hM} m`;
 }
 
 /**
@@ -123,15 +127,13 @@ export function formatLength(
     return `${inVal} in`;
   }
 
-  if (lengthMm >= 1000) {
-    const mVal = (lengthMm / 1000).toFixed(precision);
-    return `${Math.round(lengthMm).toLocaleString()} mm (${mVal} m)`;
-  }
-  return `${Math.round(lengthMm).toLocaleString()} mm`;
+  return `${formatMeters(lengthMm)} m`;
 }
 
 /**
  * Format 3D position coordinates (X, Y, Z)
+ * In Metric: unified to meters (m)
+ * In Imperial: inches (in)
  */
 export function formatCoordinates(
   xMm: number,
@@ -148,10 +150,10 @@ export function formatCoordinates(
     };
   }
   return {
-    x: Math.round(xMm).toLocaleString(),
-    y: Math.round(yMm).toLocaleString(),
-    z: Math.round(zMm).toLocaleString(),
-    unit: 'mm'
+    x: formatMeters(xMm),
+    y: formatMeters(yMm),
+    z: formatMeters(zMm),
+    unit: 'm'
   };
 }
 

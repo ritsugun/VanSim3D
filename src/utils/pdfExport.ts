@@ -619,8 +619,8 @@ export async function exportWarehouseLoadingManifestPdf(options: PdfExportOption
         hasMultipleContainers ? (isJa ? 'コンテナ' : 'Cont.') : (isJa ? '段' : 'Lyr'),
         isJa ? '管理番号 (SKU)' : 'SKU',
         isJa ? '品名 (Description)' : 'Item Description',
-        isJa ? '配置座標 X, Y, Z (mm)' : 'Position X, Y, Z (mm)',
-        isJa ? '向き寸法 (L×W×H)' : 'Oriented Dims (mm)',
+        isJa ? '配置座標 X, Y, Z (m)' : 'Position X, Y, Z (m)',
+        isJa ? '向き寸法 (L×W×H m)' : 'Oriented Dims (m)',
         isJa ? '重量' : 'Weight',
         isJa ? '累積' : 'Cumul.',
         isJa ? '注意事項' : 'Handling',
@@ -640,8 +640,8 @@ export async function exportWarehouseLoadingManifestPdf(options: PdfExportOption
         hasMultipleContainers ? `#${item.containerIndex || 1}` : `L${item.layer}`,
         item.sku,
         item.name,
-        `X:${item.x}, Y:${item.y}, Z:${item.z}`,
-        `${item.length}×${item.width}×${item.height}`,
+        `X:${(item.x / 1000).toFixed(2)}, Y:${(item.y / 1000).toFixed(2)}, Z:${(item.z / 1000).toFixed(2)}`,
+        `${(item.length / 1000).toFixed(2)}×${(item.width / 1000).toFixed(2)}×${(item.height / 1000).toFixed(2)}`,
         `${item.weight}kg`,
         `${cumul}kg`,
         flags.length > 0 ? flags.join(' ') : '-',
@@ -725,7 +725,7 @@ export async function exportWarehouseLoadingManifestPdf(options: PdfExportOption
         isJa ? 'SKU' : 'SKU',
         isJa ? '品名' : 'Description',
         isJa ? '未積載数量' : 'Qty Unplaced',
-        isJa ? '寸法 (mm)' : 'Dimensions',
+        isJa ? '寸法 (m)' : 'Dimensions (m)',
         isJa ? '重量' : 'Weight',
         isJa ? '未積載理由' : 'Reason / Constraint'
       ]
@@ -735,7 +735,7 @@ export async function exportWarehouseLoadingManifestPdf(options: PdfExportOption
       u.sku,
       u.name,
       `${u.count} ${isJa ? '個' : 'pcs'}`,
-      `${u.dimensions.length}×${u.dimensions.width}×${u.dimensions.height}`,
+      `${(u.dimensions.length / 1000).toFixed(2)}×${(u.dimensions.width / 1000).toFixed(2)}×${(u.dimensions.height / 1000).toFixed(2)}`,
       `${u.weight} kg`,
       u.reason === 'exceeds_weight' ? (isJa ? 'コンテナ最大積載重量超過' : 'Exceeds Payload Limit') :
       u.reason === 'no_spatial_fit' ? (isJa ? '空間容積不足' : 'No Spatial Fit') :

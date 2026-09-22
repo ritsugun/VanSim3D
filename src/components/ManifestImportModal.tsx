@@ -383,10 +383,10 @@ export const ManifestImportModal: React.FC<ManifestImportModalProps> = ({
                         <th className="py-2 px-2.5">No</th>
                         <th className="py-2 px-2.5">Cont#</th>
                         <th className="py-2 px-2.5">{isJa ? '品名 / SKU' : 'Item / SKU'}</th>
-                        <th className="py-2 px-2.5 font-mono">X (mm)</th>
-                        <th className="py-2 px-2.5 font-mono">Y (mm)</th>
-                        <th className="py-2 px-2.5 font-mono">Z (mm)</th>
-                        <th className="py-2 px-2.5 font-mono">L×W×H (mm)</th>
+                        <th className="py-2 px-2.5 font-mono">X (m)</th>
+                        <th className="py-2 px-2.5 font-mono">Y (m)</th>
+                        <th className="py-2 px-2.5 font-mono">Z (m)</th>
+                        <th className="py-2 px-2.5 font-mono">L×W×H (m)</th>
                         <th className="py-2 px-2.5">{isJa ? '重量' : 'Weight'}</th>
                         <th className="py-2 px-2.5">{isJa ? '段数' : 'Layer'}</th>
                       </tr>
@@ -399,10 +399,10 @@ export const ManifestImportModal: React.FC<ManifestImportModalProps> = ({
                           <td className="py-1.5 px-2.5 font-sans font-medium text-slate-800 truncate max-w-[140px]" title={item.name}>
                             {item.name}
                           </td>
-                          <td className="py-1.5 px-2.5 text-slate-600">{item.x}</td>
-                          <td className="py-1.5 px-2.5 text-slate-600">{item.y}</td>
-                          <td className="py-1.5 px-2.5 text-slate-600">{item.z}</td>
-                          <td className="py-1.5 px-2.5 text-slate-600">{item.length}×{item.width}×{item.height}</td>
+                          <td className="py-1.5 px-2.5 text-slate-600">{(item.x / 1000).toFixed(2)}</td>
+                          <td className="py-1.5 px-2.5 text-slate-600">{(item.y / 1000).toFixed(2)}</td>
+                          <td className="py-1.5 px-2.5 text-slate-600">{(item.z / 1000).toFixed(2)}</td>
+                          <td className="py-1.5 px-2.5 text-slate-600">{(item.length / 1000).toFixed(2)}×{(item.width / 1000).toFixed(2)}×{(item.height / 1000).toFixed(2)}</td>
                           <td className="py-1.5 px-2.5 text-slate-900 font-bold">{item.weight} kg</td>
                           <td className="py-1.5 px-2.5 text-slate-600">{item.layer}段</td>
                         </tr>

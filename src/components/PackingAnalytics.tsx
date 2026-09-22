@@ -5,7 +5,7 @@ import {
   Truck, DollarSign, PackageCheck, Layers, Grid3X3,
   Box, ChevronRight, PieChart, ShieldAlert, Check, Pencil, X
 } from 'lucide-react';
-import { formatVolume, formatWeight, formatLength, formatCurrency, getCurrencySymbol } from '../utils/units';
+import { formatVolume, formatWeight, formatLength, formatCurrency, getCurrencySymbol, formatDimensions } from '../utils/units';
 
 interface PackingAnalyticsProps {
   metrics: PackingMetrics;
@@ -779,7 +779,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                 <thead className="bg-slate-50 text-slate-600 text-[11px] uppercase tracking-wider font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '品名 / SKU' : 'Item Name & SKU'}</th>
-                    <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '寸法 (mm)' : 'Dimensions (mm)'}</th>
+                    <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '寸法 (m)' : 'Dimensions (m)'}</th>
                     <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単重 (kg)' : 'Unit Wt (kg)'}</th>
                     {breakdownByContainer.map((b, idx) => (
                       <th key={idx} className="py-2.5 px-3.5 text-center bg-slate-100 text-slate-800 whitespace-nowrap font-mono">
@@ -817,7 +817,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                           </div>
                         </td>
                         <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-600 text-[11px]">
-                          {row.length} × {row.width} × {row.height}
+                          {formatDimensions(row.length, row.width, row.height, unitSystem, true)}
                         </td>
                         <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-700 font-semibold">
                           {row.unitWeight} kg
@@ -975,7 +975,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                         <tr>
                           <th className="py-2.5 px-3.5 w-12 text-center">No</th>
                           <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '貨物名 / 管理SKU' : 'Cargo Item & SKU'}</th>
-                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体外寸 (L×W×H mm)' : 'Unit Dimensions (mm)'}</th>
+                          <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体外寸 (L×W×H m)' : 'Unit Dimensions (m)'}</th>
                           <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '単体重量' : 'Unit Weight'}</th>
                           <th className="py-2.5 px-3.5 text-center whitespace-nowrap bg-slate-100 text-slate-900 font-bold">
                             {isJa ? '積載個数 (Qty)' : 'Loaded Qty'}
@@ -1014,7 +1014,7 @@ export const PackingAnalytics: React.FC<PackingAnalyticsProps> = ({
                                 </div>
                               </td>
                               <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-600 text-[11px]">
-                                {item.length} × {item.width} × {item.height}
+                                {formatDimensions(item.length, item.width, item.height, unitSystem, true)}
                               </td>
                               <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-slate-700 font-semibold">
                                 {item.unitWeight} kg

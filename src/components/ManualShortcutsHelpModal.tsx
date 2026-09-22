@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   X, Keyboard, Move, RotateCw, ArrowDownToLine, Undo2, Redo2, 
-  Trash2, MousePointerClick, Zap, HelpCircle, CornerDownLeft
+  Trash2, MousePointerClick, Zap, HelpCircle, CornerDownLeft, Magnet
 } from 'lucide-react';
 import { Language } from '../types';
 
@@ -106,13 +106,74 @@ export const ManualShortcutsHelpModal: React.FC<ManualShortcutsHelpModalProps> =
             </div>
           </div>
 
-          {/* Section 2: 回転・着地・再配置 */}
+          {/* Section 2: グリッドスナップ＆マグネット吸着システム */}
+          <div className="bg-sky-50/70 dark:bg-sky-950/30 rounded-xl p-3 border border-sky-200/80 dark:border-sky-800/40">
+            <h4 className="font-bold text-sky-900 dark:text-sky-200 flex items-center gap-1.5 mb-2.5">
+              <Magnet className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+              <span>{isJa ? 'スナップ＆マグネット吸着システム (Snap & Magnetic Edge Snap)' : 'Grid Snap & Magnetic Edge Snap System'}</span>
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40">
+                <div>
+                  <span className="text-slate-800 dark:text-slate-200 font-bold">{isJa ? 'グリッドスナップ ⇄ 自由配置 切替' : 'Toggle Grid Snap / Free-form'}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{isJa ? '刻み吸着とフリー配置をワンキーで即座に切り替え' : 'Toggle between snapped alignment and free placement'}</p>
+                </div>
+                <kbd className="px-2.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900 border border-sky-300 dark:border-sky-700 font-mono font-bold text-[11px] text-sky-900 dark:text-sky-200 shadow-xs">S</kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-cyan-50/80 dark:bg-cyan-950/30 rounded-lg border border-cyan-200/80 dark:border-cyan-800/40">
+                <div>
+                  <span className="text-cyan-950 dark:text-cyan-200 font-bold">{isJa ? '🧲 マグネット端面吸着 切替' : 'Toggle Magnetic Snap'}</span>
+                  <p className="text-[10px] text-cyan-800 dark:text-cyan-300">{isJa ? '隣接貨物やコンテナ壁の端面へピタッと磁石吸着' : 'Snaps flush to adjacent cargo edges and container walls'}</p>
+                </div>
+                <kbd className="px-2.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900 border border-cyan-300 dark:border-cyan-700 font-mono font-bold text-[11px] text-cyan-900 dark:text-cyan-200 shadow-xs">B</kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40">
+                <div>
+                  <span className="text-slate-800 dark:text-slate-200 font-bold">{isJa ? 'Altキー押下で一時無効・反転' : 'Hold Alt for Inverted Snap'}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{isJa ? 'ドラッグ中にAltを押している間だけ完全フリー移動' : 'Temporarily disables snap while holding Alt'}</p>
+                </div>
+                <kbd className="px-2.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 font-mono font-bold text-[10px] text-slate-800 dark:text-slate-200 shadow-2xs">Alt</kbd>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40">
+                <div>
+                  <span className="text-slate-800 dark:text-slate-200 font-bold">{isJa ? '3D視覚ガイドライン (シアン線)' : '3D Contact Guide Lines'}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{isJa ? '端面吸着時に接合境界を鮮やかなシアン線と球マーカーで描画' : 'Vivid cyan lines & spheres highlight active edge contact'}</p>
+                </div>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 font-mono font-semibold">Visual</span>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40 col-span-1 sm:col-span-2">
+                <span className="text-slate-600 dark:text-slate-300">
+                  {isJa 
+                    ? 'グリッド刻み幅 (1cm〜50cm) とマグネット距離 (30mm〜150mm) を個別調整可能' 
+                    : 'Independently adjust grid step (1cm-50cm) and magnetic snap threshold (30mm-150mm)'}
+                </span>
+                <span className="text-sky-700 dark:text-sky-400 font-mono font-semibold text-[10px]">
+                  {isJa ? '干渉・衝突を自動防止' : 'Auto-collision check'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: 回転・着地・再配置・奥左移動 */}
           <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-700/60">
             <h4 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 mb-2.5">
               <RotateCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>{isJa ? '回転・着地・再配置モード' : 'Rotation, Landing & Reposition'}</span>
+              <span>{isJa ? '奥左移動・回転・着地・再配置モード' : 'Positioning, Rotation, Landing & Reposition'}</span>
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              {/* Q key: Snap to Back-Left */}
+              <div className="flex items-center justify-between p-2 bg-amber-50/90 dark:bg-amber-950/40 rounded-lg border border-amber-300 dark:border-amber-700 shadow-2xs">
+                <div>
+                  <span className="text-amber-950 dark:text-amber-200 font-bold">{isJa ? '一番奥左の置ける場所へ一気に移動' : 'Snap to Furthest Back-Left'}</span>
+                  <p className="text-[10px] text-amber-800 dark:text-amber-300">{isJa ? '選択貨物を干渉のない最奥左側へ自動スナップ' : 'Instantly snaps cargo to deepest back-left space'}</p>
+                </div>
+                <kbd className="px-2.5 py-0.5 rounded bg-amber-300 dark:bg-amber-700 border border-amber-400 dark:border-amber-600 font-mono font-bold text-[11px] text-amber-950 dark:text-amber-100 shadow-xs">Q</kbd>
+              </div>
+
               <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-200/60 dark:border-slate-700/40">
                 <span className="text-slate-600 dark:text-slate-300">{isJa ? '90°回転 (配置中・選択中)' : 'Rotate 90°'}</span>
                 <kbd className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 font-mono font-bold text-[10px] text-slate-800 dark:text-slate-200 shadow-2xs">R</kbd>
@@ -135,7 +196,7 @@ export const ManualShortcutsHelpModal: React.FC<ManualShortcutsHelpModalProps> =
                 <kbd className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900 border border-amber-300 dark:border-amber-700 font-mono font-bold text-[10px] text-amber-900 dark:text-amber-200 shadow-2xs">G</kbd>
               </div>
 
-              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-200/60 dark:border-slate-700/40">
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-200/60 dark:border-slate-700/40 col-span-1 sm:col-span-2">
                 <span className="text-slate-600 dark:text-slate-300">{isJa ? '選択貨物を未積載トレイに戻す' : 'Unload Selected Cargo'}</span>
                 <div className="flex items-center gap-1">
                   <kbd className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 font-mono text-[10px] text-slate-800 dark:text-slate-200 shadow-2xs">Del</kbd>
@@ -227,6 +288,10 @@ export const ManualShortcutsHelpModal: React.FC<ManualShortcutsHelpModalProps> =
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
                 <span><strong className="text-slate-800 dark:text-slate-100">{isJa ? 'ホイール回転' : 'Scroll Wheel'}:</strong> {isJa ? 'ズームイン / ズームアウト（未積載トレイ上では横スクロール）' : 'Zoom in / out (horizontal scroll over cargo tray)'}</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
+                <span><strong className="text-slate-800 dark:text-slate-100">{isJa ? 'カード/パネルのドラッグ' : 'Drag Cards & Panels'}:</strong> {isJa ? '選択貨物カードや表示設定小窓のヘッダーをつかんで画面内の好きな位置へ自由に移動可能（位置初期化ボタンあり）' : 'Grab the header of cargo inspector card or controls panel to drag anywhere on screen (with Reset Pos button)'}</span>
               </li>
               <li className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />

@@ -8,7 +8,7 @@ import {
   Edit2, Sliders, CheckSquare, Square, CheckCheck, XSquare, RotateCw, Layers, ArrowDownToLine,
   AlertTriangle, ArrowUpDown, ArrowUp, ArrowDown, Search, X, RotateCcw, ChevronDown
 } from 'lucide-react';
-import { formatVolume, formatWeight, formatWeightCompact } from '../utils/units';
+import { formatVolume, formatWeight, formatWeightCompact, formatDimensions } from '../utils/units';
 import { VIVID_NEON_PALETTE } from '../utils/colors';
 
 interface CargoManagerProps {
@@ -605,226 +605,218 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         </div>
       </div>
 
-      {/* Action Buttons Toolbar - Reordered & Grouped Logically */}
-      <div id="cargo-action-buttons-toolbar" className="space-y-1.5 mb-2.5">
-        {/* Row 1: Cargo Input & File Operations (+ Add -> Import -> Export -> Template -> Preset -> Reproduce) */}
-        <div className="flex items-center gap-1.5 flex-wrap text-xs">
-          {/* 1. + Add Cargo (Primary Creation Action) */}
+      {/* Action Buttons Toolbar - Unified & Simple */}
+      <div id="cargo-action-buttons-toolbar" className="flex items-center gap-1.5 flex-wrap mb-2.5 text-xs">
+        {/* 1. + Add Cargo (Primary Action) */}
+        <button
+          type="button"
+          id="add-new-cargo-btn"
+          onClick={() => setIsAddingNew(!isAddingNew)}
+          title={isJa ? '新しい貨物を手動入力で追加' : 'Add new cargo item manually'}
+          className="h-8 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>{isJa ? '追加' : 'Add'}</span>
+        </button>
+
+        {/* 2. Import Cargo */}
+        <label 
+          id="import-cargo-label" 
+          className="h-8 px-2.5 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+          title={isJa ? 'Excelファイル (.xlsx, .xls) または CSVファイルから一括取込' : 'Import from Excel (.xlsx/.xls) or CSV'}
+        >
+          <FileInput className="w-3.5 h-3.5 text-slate-500" />
+          <span>{isJa ? '取込' : 'Import'}</span>
+          <input 
+            type="file" 
+            accept=".xlsx, .xls, .csv, text/csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
+            onChange={handleImportFile} 
+            className="hidden" 
+          />
+        </label>
+
+        {/* 3. Export Cargo (Excel & CSV) */}
+        <div className="relative shrink-0">
           <button
             type="button"
-            id="add-new-cargo-btn"
-            onClick={() => setIsAddingNew(!isAddingNew)}
-            title={isJa ? '新しい貨物を手動入力で追加' : 'Add new cargo item manually'}
-            className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 shadow-xs transition-all active:scale-95 text-xs cursor-pointer shrink-0"
+            id="export-cargo-btn"
+            onClick={() => {
+              setShowExportDropdown(!showExportDropdown);
+              setShowTemplateDropdown(false);
+            }}
+            disabled={cargoList.length === 0}
+            title={isJa ? '貨物リストをExcel (.xlsx) または CSVで出力保存' : 'Export Cargo List as Excel or CSV'}
+            className="h-8 px-2.5 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{isJa ? '追加' : 'Add'}</span>
+            <FileOutput className="w-3.5 h-3.5 text-slate-500" />
+            <span>{isJa ? '保存' : 'Export'}</span>
+            <ChevronDown className="w-3 h-3 text-slate-400" />
           </button>
 
-          {/* 2. Import Cargo (Accepts both Excel .xlsx/.xls and CSV) */}
-          <label 
-            id="import-cargo-label" 
-            className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 cursor-pointer font-semibold flex items-center gap-1 transition-colors text-xs shadow-2xs shrink-0"
-            title={isJa ? 'Excelファイル (.xlsx, .xls) または CSVファイルから一括取込' : 'Import from Excel (.xlsx/.xls) or CSV'}
-          >
-            <FileInput className="w-3.5 h-3.5 text-emerald-600" />
-            <span>{isJa ? '取込' : 'Import'}</span>
-            <input 
-              type="file" 
-              accept=".xlsx, .xls, .csv, text/csv, application/vnd.ms-excel, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" 
-              onChange={handleImportFile} 
-              className="hidden" 
-            />
-          </label>
-
-          {/* 3. Export Cargo (Excel & CSV) */}
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              id="export-cargo-btn"
-              onClick={() => {
-                setShowExportDropdown(!showExportDropdown);
-                setShowTemplateDropdown(false);
-              }}
-              disabled={cargoList.length === 0}
-              title={isJa ? '貨物リストをExcel (.xlsx) または CSVで出力保存' : 'Export Cargo List as Excel or CSV'}
-              className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs cursor-pointer shadow-2xs"
+          {showExportDropdown && cargoList.length > 0 && (
+            <div 
+              id="export-dropdown-menu"
+              className="absolute top-full mt-1.5 left-0 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[175px] animate-fade-in text-xs font-medium"
             >
-              <FileOutput className="w-3.5 h-3.5 text-blue-600" />
-              <span>{isJa ? '保存' : 'Export'}</span>
-              <ChevronDown className="w-3 h-3 text-slate-400" />
-            </button>
-
-            {showExportDropdown && cargoList.length > 0 && (
-              <div 
-                id="export-dropdown-menu"
-                className="absolute top-full mt-1.5 left-0 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[175px] animate-fade-in text-xs font-medium"
+              <button
+                type="button"
+                onClick={() => {
+                  handleExportExcel();
+                  setShowExportDropdown(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition-colors"
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleExportExcel();
-                    setShowExportDropdown(false);
-                  }}
-                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 flex items-center gap-2 cursor-pointer transition-colors"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <div>
-                    <div className="font-semibold text-slate-800">{isJa ? 'Excel保存' : 'Export Excel'}</div>
-                    <div className="text-[10px] text-slate-400">.xlsx 形式</div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleExportCsv();
-                    setShowExportDropdown(false);
-                  }}
-                  className="w-full text-left px-3 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
-                >
-                  <FileOutput className="w-4 h-4 text-blue-600 shrink-0" />
-                  <div>
-                    <div className="font-semibold text-slate-800">{isJa ? 'CSV保存' : 'Export CSV'}</div>
-                    <div className="text-[10px] text-slate-400">.csv (カンマ区切り)</div>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 4. Template Download (Excel & CSV) */}
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              id="download-template-btn"
-              onClick={() => {
-                setShowTemplateDropdown(!showTemplateDropdown);
-                setShowExportDropdown(false);
-              }}
-              title={isJa ? 'Excel (.xlsx) または CSV形式の雛形テンプレートをダウンロード' : 'Download Excel or CSV Template'}
-              className="px-2 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium flex items-center gap-1 transition-colors text-xs cursor-pointer shadow-2xs"
-            >
-              <FileDown className="w-3.5 h-3.5 text-slate-600" />
-              <span>{isJa ? '雛形' : 'Template'}</span>
-              <ChevronDown className="w-3 h-3 text-slate-400" />
-            </button>
-
-            {showTemplateDropdown && (
-              <div 
-                id="template-dropdown-menu"
-                className="absolute top-full mt-1.5 left-0 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[175px] animate-fade-in text-xs font-medium"
+                <FileSpreadsheet className="w-4 h-4 text-slate-500 shrink-0" />
+                <div>
+                  <div className="font-semibold text-slate-800">{isJa ? 'Excel保存' : 'Export Excel'}</div>
+                  <div className="text-[10px] text-slate-400">.xlsx 形式</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleExportCsv();
+                  setShowExportDropdown(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleDownloadExcelTemplate();
-                    setShowTemplateDropdown(false);
-                  }}
-                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 flex items-center gap-2 cursor-pointer transition-colors"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <div>
-                    <div className="font-semibold text-slate-800">{isJa ? 'Excel雛形' : 'Excel Template'}</div>
-                    <div className="text-[10px] text-slate-400">.xlsx (列幅・サンプル設定済)</div>
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleDownloadCsvTemplate();
-                    setShowTemplateDropdown(false);
-                  }}
-                  className="w-full text-left px-3 py-2 hover:bg-blue-50 text-slate-700 hover:text-blue-800 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
-                >
-                  <FileDown className="w-4 h-4 text-blue-600 shrink-0" />
-                  <div>
-                    <div className="font-semibold text-slate-800">{isJa ? 'CSV雛形' : 'CSV Template'}</div>
-                    <div className="text-[10px] text-slate-400">.csv (UTF-8 BOM付き)</div>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 5. Preset (Prebuilt Demo Cargoes) */}
-          <button
-            type="button"
-            id="open-presets-btn"
-            onClick={() => setShowPresetsModal(true)}
-            title={isJa ? '標準出荷サンプルのプリセットをワンクリック読込' : 'Load preconfigured cargo presets'}
-            className="px-2 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold flex items-center gap-1 transition-colors text-xs cursor-pointer shadow-2xs shrink-0"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            <span>{isJa ? 'プリセット' : 'Preset'}</span>
-          </button>
-
-          {/* 6. Loading_Manifest Import & 3D Reproduction */}
-          {onOpenImportManifest && (
-            <button
-              type="button"
-              id="cargo-manager-open-manifest-btn"
-              onClick={onOpenImportManifest}
-              title={isJa ? 'Loading_Manifestファイルから座標(X,Y,Z)を読み込み、3D積載を完全再現' : 'Import Loading Manifest and reproduce 3D loading placement'}
-              className="px-2 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold flex items-center gap-1 transition-all active:scale-95 text-xs shadow-2xs cursor-pointer shrink-0"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-600" />
-              <span>{isJa ? '再現' : 'Reproduce'}</span>
-            </button>
+                <FileOutput className="w-4 h-4 text-slate-500 shrink-0" />
+                <div>
+                  <div className="font-semibold text-slate-800">{isJa ? 'CSV保存' : 'Export CSV'}</div>
+                  <div className="text-[10px] text-slate-400">.csv (カンマ区切り)</div>
+                </div>
+              </button>
+            </div>
           )}
         </div>
 
-        {/* Row 2: List Selection & Appearance (Select All / Deselect All, Vivid Colors, Duplicate Consolidate) */}
-        <div className="flex items-center justify-between gap-1.5 flex-wrap text-xs pt-0.5">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* 7. Quick Select All / Deselect All */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 shadow-2xs shrink-0">
+        {/* 4. Template Download (Excel & CSV) */}
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            id="download-template-btn"
+            onClick={() => {
+              setShowTemplateDropdown(!showTemplateDropdown);
+              setShowExportDropdown(false);
+            }}
+            title={isJa ? 'Excel (.xlsx) または CSV形式の雛形テンプレートをダウンロード' : 'Download Excel or CSV Template'}
+            className="h-8 px-2.5 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+          >
+            <FileDown className="w-3.5 h-3.5 text-slate-500" />
+            <span>{isJa ? '雛形' : 'Template'}</span>
+            <ChevronDown className="w-3 h-3 text-slate-400" />
+          </button>
+
+          {showTemplateDropdown && (
+            <div 
+              id="template-dropdown-menu"
+              className="absolute top-full mt-1.5 left-0 z-30 bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[175px] animate-fade-in text-xs font-medium"
+            >
               <button
                 type="button"
-                id="select-all-cargo-btn"
-                onClick={() => handleToggleAll(true)}
-                disabled={isAllSelected}
-                title={isJa ? 'すべての貨物を積載対象にする' : 'Select all items'}
-                className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
-                  isAllSelected 
-                    ? 'text-slate-400 cursor-not-allowed' 
-                    : 'bg-white text-blue-700 shadow-2xs hover:bg-blue-50'
-                }`}
+                onClick={() => {
+                  handleDownloadExcelTemplate();
+                  setShowTemplateDropdown(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition-colors"
               >
-                <CheckCheck className="w-3.5 h-3.5" />
-                <span>{isJa ? '全選択' : 'Select All'}</span>
+                <FileSpreadsheet className="w-4 h-4 text-slate-500 shrink-0" />
+                <div>
+                  <div className="font-semibold text-slate-800">{isJa ? 'Excel雛形' : 'Excel Template'}</div>
+                  <div className="text-[10px] text-slate-400">.xlsx (列幅・サンプル設定済)</div>
+                </div>
               </button>
               <button
                 type="button"
-                id="deselect-all-cargo-btn"
-                onClick={() => handleToggleAll(false)}
-                disabled={isNoneSelected}
-                title={isJa ? 'すべての貨物の積載を解除する' : 'Deselect all items'}
-                className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
-                  isNoneSelected 
-                    ? 'text-slate-400 cursor-not-allowed' 
-                    : 'bg-white text-slate-700 shadow-2xs hover:bg-slate-50'
-                }`}
+                onClick={() => {
+                  handleDownloadCsvTemplate();
+                  setShowTemplateDropdown(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 text-slate-700 hover:text-slate-900 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
               >
-                <XSquare className="w-3.5 h-3.5" />
-                <span>{isJa ? '全解除' : 'Deselect All'}</span>
+                <FileDown className="w-4 h-4 text-slate-500 shrink-0" />
+                <div>
+                  <div className="font-semibold text-slate-800">{isJa ? 'CSV雛形' : 'CSV Template'}</div>
+                  <div className="text-[10px] text-slate-400">.csv (UTF-8 BOM付き)</div>
+                </div>
               </button>
             </div>
-
-            {/* Duplicate consolidation button if duplicates exist */}
-            {hasDuplicateItems && (
-              <button
-                type="button"
-                id="consolidate-duplicates-btn"
-                onClick={handleConsolidateDuplicates}
-                title={isJa ? '同一の品名・寸法・特性を持つ貨物を1行にまとめて数量集約' : 'Aggregate duplicate cargo entries into single rows'}
-                className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold flex items-center gap-1 transition-colors animate-pulse text-xs cursor-pointer shrink-0"
-              >
-                <Layers className="w-3.5 h-3.5 text-amber-600" />
-                <span>{isJa ? '重複集約' : 'Aggregate'}</span>
-              </button>
-            )}
-          </div>
+          )}
         </div>
+
+        {/* 5. Preset (Prebuilt Demo Cargoes) */}
+        <button
+          type="button"
+          id="open-presets-btn"
+          onClick={() => setShowPresetsModal(true)}
+          title={isJa ? '標準出荷サンプルのプリセットをワンクリック読込' : 'Load preconfigured cargo presets'}
+          className="h-8 px-2.5 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-slate-500" />
+          <span>{isJa ? 'プリセット' : 'Preset'}</span>
+        </button>
+
+        {/* 6. Loading_Manifest Import & 3D Reproduction */}
+        {onOpenImportManifest && (
+          <button
+            type="button"
+            id="cargo-manager-open-manifest-btn"
+            onClick={onOpenImportManifest}
+            title={isJa ? 'Loading_Manifestファイルから座標(X,Y,Z)を読み込み、3D積載を完全再現' : 'Import Loading Manifest and reproduce 3D loading placement'}
+            className="h-8 px-2.5 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-slate-500" />
+            <span>{isJa ? '再現' : 'Reproduce'}</span>
+          </button>
+        )}
+
+        {/* 7. Quick Select All / Deselect All */}
+        <div className="h-8 inline-flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs shrink-0">
+          <button
+            type="button"
+            id="select-all-cargo-btn"
+            onClick={() => handleToggleAll(true)}
+            disabled={isAllSelected}
+            title={isJa ? 'すべての貨物を積載対象にする' : 'Select all items'}
+            className={`h-7 px-2 rounded-md font-medium text-[11px] flex items-center gap-1 transition-colors ${
+              isAllSelected 
+                ? 'text-slate-400 cursor-not-allowed' 
+                : 'bg-white text-slate-700 hover:text-slate-900 shadow-2xs cursor-pointer'
+            }`}
+          >
+            <CheckCheck className={`w-3.5 h-3.5 ${isAllSelected ? 'text-slate-400' : 'text-slate-500'}`} />
+            <span>{isJa ? '全選択' : 'Select All'}</span>
+          </button>
+          <button
+            type="button"
+            id="deselect-all-cargo-btn"
+            onClick={() => handleToggleAll(false)}
+            disabled={isNoneSelected}
+            title={isJa ? 'すべての貨物の積載を解除する' : 'Deselect all items'}
+            className={`h-7 px-2 rounded-md font-medium text-[11px] flex items-center gap-1 transition-colors ${
+              isNoneSelected 
+                ? 'text-slate-400 cursor-not-allowed' 
+                : 'bg-white text-slate-700 hover:text-slate-900 shadow-2xs cursor-pointer'
+            }`}
+          >
+            <XSquare className={`w-3.5 h-3.5 ${isNoneSelected ? 'text-slate-400' : 'text-slate-500'}`} />
+            <span>{isJa ? '全解除' : 'Deselect All'}</span>
+          </button>
+        </div>
+
+        {/* Duplicate consolidation button if duplicates exist */}
+        {hasDuplicateItems && (
+          <button
+            type="button"
+            id="consolidate-duplicates-btn"
+            onClick={handleConsolidateDuplicates}
+            title={isJa ? '同一の品名・寸法・特性を持つ貨物を1行にまとめて数量集約' : 'Aggregate duplicate cargo entries into single rows'}
+            className="h-8 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer shrink-0"
+          >
+            <Layers className="w-3.5 h-3.5 text-amber-600" />
+            <span>{isJa ? '重複集約' : 'Aggregate'}</span>
+          </button>
+        )}
       </div>
 
       {/* Import / Clear Notification Banner */}
@@ -1186,9 +1178,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                   id="apply-sort-order-btn"
                   onClick={handleApplySortToManifest}
                   title={isJa ? '現在の並び順をマニフェスト（登録順）に保存して固定' : 'Save current order to manifest list'}
-                  className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-[10px] sm:text-[10.5px] font-bold flex items-center gap-0.5 shadow-2xs transition-colors cursor-pointer"
+                  className="px-2 py-0.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded text-[10px] sm:text-[10.5px] font-medium flex items-center gap-0.5 shadow-2xs transition-colors cursor-pointer"
                 >
-                  <Check className="w-2.5 h-2.5 text-indigo-600" />
+                  <Check className="w-2.5 h-2.5 text-slate-500" />
                   <span>{isJa ? '順固定' : 'Save'}</span>
                 </button>
               )}
@@ -1218,19 +1210,19 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
             <div className="flex items-center justify-center gap-2 flex-wrap pt-2">
               <button
                 type="button"
-                id="empty-open-presets-btn"
-                onClick={() => setShowPresetsModal(true)}
-                className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold flex items-center gap-1 text-xs cursor-pointer shadow-2xs transition-colors"
+                id="empty-add-item-btn"
+                onClick={() => setIsAddingNew(true)}
+                className="h-8 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-medium flex items-center gap-1.5 text-xs cursor-pointer shadow-2xs transition-colors"
               >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                <span>{isJa ? '混載プリセット読込' : 'Load Preset'}</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isJa ? '新規貨物を追加' : 'Add New Item'}</span>
               </button>
               <label 
                 id="empty-import-file-label" 
-                className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold flex items-center gap-1.5 text-xs cursor-pointer shadow-2xs transition-colors"
+                className="h-8 px-3 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 text-xs cursor-pointer shadow-2xs transition-colors"
                 title={isJa ? 'Excel (.xlsx/.xls) または CSVファイルから一括取込' : 'Import from Excel or CSV'}
               >
-                <FileInput className="w-3.5 h-3.5 text-emerald-600" />
+                <FileInput className="w-3.5 h-3.5 text-slate-500" />
                 <span>{isJa ? 'Excel / CSV取込' : 'Import Excel / CSV'}</span>
                 <input 
                   type="file" 
@@ -1241,12 +1233,12 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
               </label>
               <button
                 type="button"
-                id="empty-add-item-btn"
-                onClick={() => setIsAddingNew(true)}
-                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-1 text-xs cursor-pointer shadow-xs transition-colors"
+                id="empty-open-presets-btn"
+                onClick={() => setShowPresetsModal(true)}
+                className="h-8 px-3 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 font-medium flex items-center gap-1.5 text-xs cursor-pointer shadow-2xs transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{isJa ? '新規貨物を追加' : 'Add New Item'}</span>
+                <Sparkles className="w-3.5 h-3.5 text-slate-500" />
+                <span>{isJa ? '混載プリセット読込' : 'Load Preset'}</span>
               </button>
             </div>
           </div>
@@ -1373,7 +1365,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                   <div className="flex items-center justify-between gap-1.5 pt-0.5 text-slate-600 flex-wrap">
                     <div className="flex items-center gap-1.5 min-w-0 font-mono text-[10px] sm:text-[10.5px]">
                       <span className="font-semibold text-slate-700 bg-slate-100 px-1 py-0.5 rounded text-[9.5px] sm:text-[10px] shrink-0">
-                        {cargo.width}×{cargo.height}×{cargo.length}
+                        {formatDimensions(cargo.length, cargo.width, cargo.height, unitSystem, true)}
                       </span>
                       <span className="text-emerald-700 font-bold shrink-0">
                         {formatWeightCompact(cargo.weight, unitSystem)}
@@ -1463,6 +1455,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       <div>
                         <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
                           {isJa ? '幅 W (mm)' : 'Width W (mm)'}
+                          <span className="text-slate-400 font-normal ml-1">({(cargo.width / 1000).toFixed(2)}m)</span>
                         </label>
                         <input
                           type="number"
@@ -1476,6 +1469,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       <div>
                         <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
                           {isJa ? '高さ H (mm)' : 'Height H (mm)'}
+                          <span className="text-slate-400 font-normal ml-1">({(cargo.height / 1000).toFixed(2)}m)</span>
                         </label>
                         <input
                           type="number"
@@ -1489,6 +1483,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       <div>
                         <label className="text-[10px] text-slate-500 font-medium block mb-0.5">
                           {isJa ? '奥行 D / 長 (mm)' : 'Depth / Length (mm)'}
+                          <span className="text-slate-400 font-normal ml-1">({(cargo.length / 1000).toFixed(2)}m)</span>
                         </label>
                         <input
                           type="number"
@@ -1619,7 +1614,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                 return (
                   <div
                     key={preset.id}
-                    className="border border-slate-200 hover:border-indigo-400 rounded-xl p-3.5 hover:bg-indigo-50/20 transition-all cursor-pointer text-xs"
+                    className="border border-slate-200 hover:border-blue-400 rounded-xl p-3.5 hover:bg-slate-50/60 transition-all cursor-pointer text-xs"
                     onClick={() => handleLoadPreset(preset)}
                   >
                     <div className="flex items-start justify-between gap-3 mb-1.5">
@@ -1633,7 +1628,7 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
                       </div>
                       <button
                         type="button"
-                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shrink-0 shadow-xs"
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-xs shrink-0 shadow-2xs transition-colors cursor-pointer"
                       >
                         {isJa ? '適用する' : 'Load'}
                       </button>

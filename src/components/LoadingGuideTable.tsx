@@ -487,10 +487,10 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
               )}
               <th className="py-2.5 px-3.5 whitespace-nowrap">{isJa ? '品名 / SKU' : 'Item Name & SKU'}</th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
-                {isJa ? '配置座標 (X, Y, Z mm)' : 'Position (mm)'}
+                {isJa ? '配置座標 (X, Y, Z m)' : 'Position (m)'}
               </th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
-                {isJa ? '寸法 (L×W×H mm)' : 'Dimensions (mm)'}
+                {isJa ? '寸法 (L×W×H m)' : 'Dimensions (m)'}
               </th>
               <th className="py-2.5 px-3.5 whitespace-nowrap">
                 <button 

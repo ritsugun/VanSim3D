@@ -40,19 +40,19 @@ export const STANDARD_CONTAINERS: Container[] = [
     color: '#0f766e', // Teal
     description: 'High Cube 40ft container with extra vertical clearance (2.7m height). Maximizes volume for lightweight bulky cargo.'
   },
-  {
-    id: '45hc',
-    name: '45ft High Cube Container (45HC)',
-    category: 'iso_sea',
-    length: 13556, // mm
-    width: 2352,  // mm
-    height: 2698, // mm
-    maxWeight: 27600, // kg payload
-    tareWeight: 4800, // kg
-    costEstimate: 4200,
-    color: '#4338ca', // Indigo
-    description: '45ft high-capacity container used for international intermodal routes with maximum CBM capacity (86 m³).'
-  },
+  // {
+  //   id: '45hc',
+  //   name: '45ft High Cube Container (45HC)',
+  //   category: 'iso_sea',
+  //   length: 13556, // mm
+  //   width: 2352,  // mm
+  //   height: 2698, // mm
+  //   maxWeight: 27600, // kg payload
+  //   tareWeight: 4800, // kg
+  //   costEstimate: 4200,
+  //   color: '#4338ca', // Indigo
+  //   description: '45ft high-capacity container used for international intermodal routes with maximum CBM capacity (86 m³).'
+  // },
   // {
   //   id: '53trailer',
   //   name: '53ft Semi-Trailer (Dry Van)',
@@ -79,19 +79,72 @@ export const STANDARD_CONTAINERS: Container[] = [
   //   color: '#dc2626', // Red
   //   description: 'Japanese standard 10-ton wing/van heavy freight truck for domestic linehaul transport.'
   // },
-  // {
-  //   id: '4t_truck',
-  //   name: '4-Ton Medium Freight Truck (4t 中型車)',
-  //   category: 'truck',
-  //   length: 6200, // mm
-  //   width: 2150,  // mm
-  //   height: 2200, // mm
-  //   maxWeight: 4000, // kg payload
-  //   tareWeight: 4100, // kg
-  //   costEstimate: 750,
-  //   color: '#ea580c', // Orange
-  //   description: 'Versatile 4-ton freight truck for urban and regional multi-stop distribution.'
-  // },
+  {
+    id: '4t_truck',
+    name: '4-Ton Medium Freight Truck (4t 中型車)',
+    category: 'truck',
+    length: 6200, // mm
+    width: 2150,  // mm
+    height: 2200, // mm
+    maxWeight: 4000, // kg payload
+    tareWeight: 4100, // kg
+    costEstimate: 750,
+    color: '#ea580c', // Orange
+    description: 'Versatile 4-ton freight truck for urban and regional multi-stop distribution.'
+  },
+  {
+    id: 'CC_Box',
+    name: 'CC_Box ',
+    category: 'pallet',
+    length: 300, // mm
+    width: 250,  // mm
+    height: 250, // mm
+    maxWeight: 100, // kg payload
+    tareWeight: 2, // kg
+    costEstimate: 10,
+    color: '#ea580c', // Orange
+    description: 'CC_BOX.'
+  },
+  {
+    id: 'DD_Box',
+    name: 'DD_BOX',
+    category: 'pallet',
+    length: 400, // mm
+    width: 300,  // mm
+    height: 250, // mm
+    maxWeight: 100, // kg payload
+    tareWeight: 2, // kg
+    costEstimate: 10,
+    color: '#ea580c', // Orange
+    description: 'DD_BOX.'
+  },
+  {
+    id: 'ES_Box',
+    name: 'ES_BOX',
+    category: 'pallet',
+    length: 550, // mm
+    width: 410,  // mm
+    height: 320, // mm
+    maxWeight: 100, // kg payload
+    tareWeight: 2, // kg
+    costEstimate: 10,
+    color: '#ea580c', // Orange
+    description: 'ES_BOX.'
+  },
+  {
+    id: 'Big_Box',
+    name: 'ACR_Big_box (大箱)',
+    category: 'pallet',
+    length: 1160, // mm
+    width: 1150,  // mm
+    height: 720, // mm
+    maxWeight: 1800, // kg payload
+    tareWeight: 22, // kg
+    costEstimate: 70,
+    color: '#ea580c', // Orange
+    description: '大箱.'
+  },
+
   // {
   //   id: 'eur_pallet',
   //   name: 'Euro Pallet (EUR-1 1200x800)',

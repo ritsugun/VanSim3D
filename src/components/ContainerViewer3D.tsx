@@ -12,9 +12,13 @@ import {
   Scale, LayoutGrid, List, Search, Plus, PackagePlus, PackageMinus,
   HelpCircle, Keyboard
 } from 'lucide-react';
-import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
+import { formatDimensions, formatCoordinates, formatWeightCompact, formatMeters } from '../utils/units';
 import { VIVID_NEON_PALETTE, boostHexToVivid } from '../utils/colors';
-import { calculateSupportHeight, checkContainerBounds, isRestingOnFragile, check3DItemCollision, findMaxNonCollidingPosition } from '../utils/manualAdjustment';
+import { 
+  calculateSupportHeight, calculateDropSupportHeight, checkContainerBounds, 
+  isRestingOnFragile, check3DItemCollision, findMaxNonCollidingPosition, 
+  findDeepestBackLeftPosition, applyMagneticEdgeSnap, MagneticSnapCandidate 
+} from '../utils/manualAdjustment';
 import { ManualShortcutsHelpModal } from './ManualShortcutsHelpModal';
 
 interface ContainerViewer3DProps {
@@ -88,7 +92,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const cogGroupRef = useRef<THREE.Group | null>(null);
   const containersGroupRef = useRef<THREE.Group | null>(null);
   const ghostGroupRef = useRef<THREE.Group | null>(null);
+  const snapGridGroupRef = useRef<THREE.Group | null>(null);
+  const magneticGuideGroupRef = useRef<THREE.Group | null>(null);
+  const lastNonZeroGridSnapMm = useRef<number>(50);
+  const lastNonZeroMagSnapMm = useRef<number>(75);
   const draggedUnplacedRef = useRef<{ unplaced: UnplacedItem; rotation: 0 | 1; color: string } | null>(null);
+  const lastCameraLayoutRef = useRef<{
+    containerId: string;
+    lenM: number;
+    widM: number;
+    heiM: number;
+    isSideBySide: boolean;
+    countToRender: number;
+  } | null>(null);
 
   // Manual Adjustment State
   const [internalManualMode, setInternalManualMode] = useState<boolean>(false);
@@ -117,6 +133,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     color: string;
   } | null>(null);
   const [gridSnapMm, setGridSnapMm] = useState<number>(50);
+  const [magneticSnapMm, setMagneticSnapMm] = useState<number>(75);
   const [showUnplacedTray, setShowUnplacedTray] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDraggingExistingItem, setIsDraggingExistingItem] = useState<PackedItem | null>(null);
@@ -131,6 +148,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     invalidReason?: string;
     offsetZ?: number;
     containerIndex?: number;
+    magneticSnap?: MagneticSnapCandidate;
   } | null>(null);
 
   const [confirmingUnload, setConfirmingUnload] = useState<boolean>(false);
@@ -185,6 +203,66 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       setToastMessage(prev => prev === msg ? null : prev);
     }, 3500);
   }, []);
+
+  // Toggle between Grid Snap and Free-form placement
+  const toggleGridSnap = useCallback(() => {
+    setGridSnapMm(prev => {
+      if (prev > 0) {
+        lastNonZeroGridSnapMm.current = prev;
+        showToast(isJa ? '自由配置 (Free-form) に切り替えました [S]' : 'Switched to Free-form placement [S]');
+        return 0;
+      } else {
+        const restored = lastNonZeroGridSnapMm.current > 0 ? lastNonZeroGridSnapMm.current : 50;
+        showToast(isJa 
+          ? `グリッドスナップを有効にしました (${formatMeters(restored)}m) [S]` 
+          : `Snap-to-Grid enabled (${formatMeters(restored)}m) [S]`);
+        return restored;
+      }
+    });
+  }, [isJa, showToast]);
+
+  // Select incremental snap grid step
+  const handleSelectGridSnap = useCallback((valMm: number) => {
+    setGridSnapMm(valMm);
+    if (valMm > 0) {
+      lastNonZeroGridSnapMm.current = valMm;
+      showToast(isJa 
+        ? `スナップ刻み幅を ${formatMeters(valMm)}m に設定しました` 
+        : `Snap grid interval set to ${formatMeters(valMm)}m`);
+    } else {
+      showToast(isJa ? '自由配置 (Free-form) に切り替えました' : 'Switched to Free-form placement');
+    }
+  }, [isJa, showToast]);
+
+  // Toggle magnetic edge snap between enabled (e.g. 75mm) and off (0mm)
+  const toggleMagneticSnap = useCallback(() => {
+    setMagneticSnapMm(prev => {
+      if (prev > 0) {
+        lastNonZeroMagSnapMm.current = prev;
+        showToast(isJa ? '🧲 マグネット吸着を解除しました (自由移動) [B]' : '🧲 Magnetic snap disabled (Free move) [B]');
+        return 0;
+      } else {
+        const restored = lastNonZeroMagSnapMm.current > 0 ? lastNonZeroMagSnapMm.current : 75;
+        showToast(isJa 
+          ? `🧲 マグネット吸着を有効化しました (${restored}mm 以内の端面に吸着) [B]` 
+          : `🧲 Magnetic snap enabled (${restored}mm threshold) [B]`);
+        return restored;
+      }
+    });
+  }, [isJa, showToast]);
+
+  // Select magnetic edge snap attraction threshold distance
+  const handleSelectMagneticSnap = useCallback((valMm: number) => {
+    setMagneticSnapMm(valMm);
+    if (valMm > 0) {
+      lastNonZeroMagSnapMm.current = valMm;
+      showToast(isJa 
+        ? `🧲 マグネット吸着距離を ${valMm}mm (${valMm / 10}cm) に設定しました` 
+        : `🧲 Magnetic snap threshold set to ${valMm}mm`);
+    } else {
+      showToast(isJa ? '🧲 マグネット吸着を無効化しました' : '🧲 Magnetic snap disabled');
+    }
+  }, [isJa, showToast]);
 
   // Resolve authentic item color from unplaced item, cargoList, or packedItems
   const getUnplacedItemColor = useCallback((item: UnplacedItem): string => {
@@ -290,7 +368,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [currentStep, setCurrentStep] = useState<number>(activeItemsToDisplay.length);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [showCoG, setShowCoG] = useState<boolean>(true);
+  const [showCoG, setShowCoG] = useState<boolean>(false); // Default to false (off) per user request
   const [showWireframeOnly, setShowWireframeOnly] = useState<boolean>(false);
   const [isTranslucent, setIsTranslucent] = useState<boolean>(false); // Default to false (100% opaque) per user request: "貨物透明度の初期値は１００％不透明にして"
   const [cargoOpacity, setCargoOpacity] = useState<number>(100); // 100% opaque default
@@ -333,7 +411,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragStartOffset = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Handle Drag Start
+  // Drag-and-drop state for floating Selected Box Inspector Card
+  const inspectorCardRef = useRef<HTMLDivElement>(null);
+  const [inspectorPos, setInspectorPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDraggingInspector, setIsDraggingInspector] = useState<boolean>(false);
+  const inspectorDragStartOffset = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  // Handle Controls Panel Drag Start
   const handlePanelDragStart = (e: React.MouseEvent | React.TouchEvent) => {
     // Avoid dragging when clicking inside interactive elements like buttons, inputs, selects
     const target = e.target as HTMLElement;
@@ -363,6 +447,85 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
     setIsDragging(true);
   };
+
+  // Handle Inspector Card Drag Start
+  const handleInspectorDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+    // Avoid dragging when clicking inside interactive elements like buttons, inputs, selects
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('a')) {
+      return;
+    }
+
+    if (!inspectorCardRef.current || !viewerWrapperRef.current) return;
+
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+
+    const cardRect = inspectorCardRef.current.getBoundingClientRect();
+    const wrapperRect = viewerWrapperRef.current.getBoundingClientRect();
+
+    inspectorDragStartOffset.current = {
+      x: clientX - cardRect.left,
+      y: clientY - cardRect.top,
+    };
+
+    if (!inspectorPos) {
+      setInspectorPos({
+        x: cardRect.left - wrapperRect.left,
+        y: cardRect.top - wrapperRect.top,
+      });
+    }
+
+    setIsDraggingInspector(true);
+  };
+
+  // Window-level mouse/touch move & up listeners for inspector card dragging
+  useEffect(() => {
+    if (!isDraggingInspector) return;
+
+    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      if (!viewerWrapperRef.current || !inspectorCardRef.current) return;
+
+      const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX;
+      const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY;
+
+      const wrapperRect = viewerWrapperRef.current.getBoundingClientRect();
+      const cardWidth = inspectorCardRef.current.offsetWidth || 300;
+      const cardHeight = inspectorCardRef.current.offsetHeight || 380;
+
+      let newX = clientX - wrapperRect.left - inspectorDragStartOffset.current.x;
+      let newY = clientY - wrapperRect.top - inspectorDragStartOffset.current.y;
+
+      // Bound clamping inside viewer with 8px margin
+      const minX = 8;
+      const maxX = Math.max(minX, wrapperRect.width - cardWidth - 8);
+      const minY = 8;
+      const maxY = Math.max(minY, wrapperRect.height - cardHeight - 8);
+
+      newX = Math.max(minX, Math.min(newX, maxX));
+      newY = Math.max(minY, Math.min(newY, maxY));
+
+      setInspectorPos({ x: newX, y: newY });
+    };
+
+    const handlePointerUp = () => {
+      setIsDraggingInspector(false);
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('mouseup', handlePointerUp);
+    window.addEventListener('touchmove', handlePointerMove, { passive: false });
+    window.addEventListener('touchend', handlePointerUp);
+    window.addEventListener('touchcancel', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('mouseup', handlePointerUp);
+      window.removeEventListener('touchmove', handlePointerMove);
+      window.removeEventListener('touchend', handlePointerUp);
+      window.removeEventListener('touchcancel', handlePointerUp);
+    };
+  }, [isDraggingInspector]);
 
   // Window-level mouse/touch move & up listeners for smooth non-blocking dragging
   useEffect(() => {
@@ -545,17 +708,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       : null;
     const contItems = activeContLoad ? activeContLoad.packedItems : packedItems;
 
-    const targetZ = calculateSupportHeight(
-      item.x,
-      item.y,
-      item.length,
-      item.width,
-      contItems,
-      item.id
-    );
+    // Calculate landing Z strictly beneath the item under gravity
+    const targetZ = calculateDropSupportHeight(item, contItems, container.height);
 
-    if (item.z === targetZ) {
-      showToast(isJa ? `「${item.name}」は既に最下部（Z: ${targetZ}mm）に接地しています` : `"${item.name}" is already resting at Z: ${targetZ}mm`);
+    if (Math.abs(item.z - targetZ) <= 1) {
+      showToast(isJa 
+        ? `「${item.name}」は既に最下部（Z: ${formatMeters(item.z)}m）に接地しています` 
+        : `"${item.name}" is already resting at Z: ${formatMeters(item.z)}m`);
       return;
     }
 
@@ -568,7 +727,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     onManualMoveItem(item.id, {
       x: item.x,
       y: item.y,
-      z: targetZ
+      z: targetZ,
+      length: item.length,
+      width: item.width,
+      height: item.height,
+      rotationIndex: item.rotationIndex
     });
 
     if (onSelectItem) {
@@ -576,9 +739,65 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     }
 
     showToast(isJa 
-      ? `「${item.name}」を直下（Z: ${targetZ}mm）へ着地させました` 
-      : `Dropped "${item.name}" to Z: ${targetZ}mm`);
-  }, [activeSelectedItem, onManualMoveItem, containers, currentTab, packedItems, isJa, showToast, onSelectItem]);
+      ? `「${item.name}」を着地させました (Z: ${formatMeters(item.z)}m → ${formatMeters(targetZ)}m)` 
+      : `Dropped "${item.name}" to Z: ${formatMeters(targetZ)}m`);
+  }, [activeSelectedItem, onManualMoveItem, containers, currentTab, packedItems, container.height, isJa, showToast, onSelectItem]);
+
+  // Move selected cargo to the deepest back-left available position in the container (Q key shortcut)
+  const handleMoveToDeepestBackLeft = useCallback((targetItem?: PackedItem | null) => {
+    const raw = targetItem || activeSelectedItemRef.current || activeSelectedItem;
+    if (!raw || !onManualMoveItem) return;
+    const item = packedItems.find(p => p.id === raw.id) || raw;
+
+    const targetContNum = item.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1);
+    const activeContLoad = (containers && containers.length > 0)
+      ? (containers.find(c => c.containerIndex === targetContNum) || containers[0])
+      : null;
+    const contItems = activeContLoad ? activeContLoad.packedItems : packedItems;
+    const targetCont = activeContLoad?.container || container;
+
+    const bestPos = findDeepestBackLeftPosition(item, contItems, targetCont, gridSnapMm);
+
+    if (!bestPos) {
+      showToast(isJa
+        ? `「${item.name}」を配置できる奥左側の空きスペースが見つかりませんでした`
+        : `No valid back-left placement position found for "${item.name}"`);
+      return;
+    }
+
+    if (bestPos.x === item.x && bestPos.y === item.y && bestPos.z === item.z) {
+      showToast(isJa
+        ? `「${item.name}」は既に一番奥左の置ける場所に配置されています (X: 0.00m / Y: ${formatMeters(item.y)}m)`
+        : `"${item.name}" is already at the furthest back-left valid position`);
+      return;
+    }
+
+    const updated = {
+      ...item,
+      x: bestPos.x,
+      y: bestPos.y,
+      z: bestPos.z
+    };
+    activeSelectedItemRef.current = updated;
+
+    onManualMoveItem(item.id, {
+      x: bestPos.x,
+      y: bestPos.y,
+      z: bestPos.z,
+      length: item.length,
+      width: item.width,
+      height: item.height,
+      rotationIndex: item.rotationIndex
+    });
+
+    if (onSelectItem) {
+      onSelectItem(updated);
+    }
+
+    showToast(isJa
+      ? `「${item.name}」を一番奥左の置ける位置へ移動しました (奥: ${formatMeters(bestPos.x)}m, 左: ${formatMeters(bestPos.y)}m, 高さ: ${formatMeters(bestPos.z)}m)`
+      : `Moved "${item.name}" to furthest back-left position (X:${formatMeters(bestPos.x)}m, Y:${formatMeters(bestPos.y)}m, Z:${formatMeters(bestPos.z)}m)`);
+  }, [activeSelectedItem, onManualMoveItem, containers, currentTab, packedItems, container, gridSnapMm, isJa, showToast, onSelectItem]);
 
   // Safely nudge an item along an axis without penetrating walls or other packed items
   const handleNudgeItem = useCallback((
@@ -723,6 +942,46 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     return Math.min(100, (packedVol / contVol) * 100);
   }, [containers, container, packedItems]);
 
+  // Current active container load for utilization and detail display
+  const currentActiveContainerLoad = useMemo(() => {
+    if (!containers || containers.length === 0) return null;
+    if (typeof currentTab === 'number') {
+      return containers.find(c => c.containerIndex === currentTab) 
+        || containers[Math.max(0, currentTab - 1)] 
+        || containers[0];
+    }
+    return containers[0];
+  }, [containers, currentTab]);
+
+  const currentActiveUtilization = useMemo(() => {
+    if (currentActiveContainerLoad?.metrics?.volumeUtilization !== undefined) {
+      return currentActiveContainerLoad.metrics.volumeUtilization;
+    }
+    return singleContainerUtilization || 0;
+  }, [currentActiveContainerLoad, singleContainerUtilization]);
+
+  const handlePrevContainer = () => {
+    if (!containers || containers.length <= 1) return;
+    if (currentTab === 'all') {
+      setTab(containers.length);
+    } else {
+      const cur = typeof currentTab === 'number' ? currentTab : 1;
+      const prev = cur > 1 ? cur - 1 : containers.length;
+      setTab(prev);
+    }
+  };
+
+  const handleNextContainer = () => {
+    if (!containers || containers.length <= 1) return;
+    if (currentTab === 'all') {
+      setTab(1);
+    } else {
+      const cur = typeof currentTab === 'number' ? currentTab : 1;
+      const next = cur < containers.length ? cur + 1 : 1;
+      setTab(next);
+    }
+  };
+
   // Sync currentStep when items change
   useEffect(() => {
     setCurrentStep(activeItemsToDisplay.length);
@@ -843,6 +1102,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           rendererRef.current = null;
         }
         sceneRef.current = null;
+        cameraRef.current = null;
+        controlsRef.current = null;
+        containersGroupRef.current = null;
+        lastCameraLayoutRef.current = null;
+        boxMeshesRef.current.clear();
+        cogGroupRef.current = null;
+        ghostGroupRef.current = null;
+        snapGridGroupRef.current = null;
       };
     } catch (err: any) {
       console.error('Three.js / WebGL initialization error:', err);
@@ -851,16 +1118,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   }, []);
 
   // Update Container Geometry & Visual Walls (Supports single or multi side-by-side)
+  // Always ensures container meshes exist in the active scene, while only re-centering camera when container layout changes
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-
-    if (containersGroupRef.current) {
-      scene.remove(containersGroupRef.current);
-    }
-
-    const allContainersGroup = new THREE.Group();
-    containersGroupRef.current = allContainersGroup;
 
     const lenM = container.length / 1000;
     const widM = container.width / 1000;
@@ -869,6 +1130,15 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
     const countToRender = isSideBySide ? containers.length : 1;
     const spacingM = widM + 1.2;
+
+    // Clean up previous container meshes in scene
+    if (containersGroupRef.current) {
+      scene.remove(containersGroupRef.current);
+      containersGroupRef.current = null;
+    }
+
+    const allContainersGroup = new THREE.Group();
+    containersGroupRef.current = allContainersGroup;
 
     for (let cIdx = 0; cIdx < countToRender; cIdx++) {
       const zOffsetM = isSideBySide ? cIdx * spacingM : 0;
@@ -939,8 +1209,18 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
     scene.add(allContainersGroup);
 
-    // Re-center camera controls target
-    if (controlsRef.current && cameraRef.current) {
+    // Re-center camera controls target ONLY when layout actually changed (mount or side-by-side mode switch)
+    // Never re-center or disrupt camera angle during cargo deletions or manual item adjustments!
+    const lastLayout = lastCameraLayoutRef.current;
+    const layoutChanged = !lastLayout ||
+      lastLayout.containerId !== container.id ||
+      lastLayout.lenM !== lenM ||
+      lastLayout.widM !== widM ||
+      lastLayout.heiM !== heiM ||
+      lastLayout.isSideBySide !== Boolean(isSideBySide) ||
+      lastLayout.countToRender !== countToRender;
+
+    if (layoutChanged && controlsRef.current && cameraRef.current) {
       controlsRef.current.minPolarAngle = 0;
       controlsRef.current.maxPolarAngle = Math.PI;
       if (isSideBySide) {
@@ -956,7 +1236,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       controlsRef.current.maxPolarAngle = currentPolar;
       controlsRef.current.update();
     }
-  }, [container, currentTab, containers, sceneReady]);
+
+    lastCameraLayoutRef.current = {
+      containerId: container.id,
+      lenM,
+      widM,
+      heiM,
+      isSideBySide: Boolean(isSideBySide),
+      countToRender
+    };
+  }, [container.id, container.length, container.width, container.height, currentTab, (containers ? containers.length : 1), sceneReady]);
 
   // Update Cargo Box Meshes in Three.js Scene
   useEffect(() => {
@@ -1202,7 +1491,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     scene.add(allCogGroup);
   }, [centerOfGravity, showCoG, activeItemsToDisplay.length, currentTab, containers, container, sceneReady]);
 
-  // Update Ghost Box in 3D Scene
+  // Update Ghost Box in 3D Scene & Magnetic snap lines
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -1211,6 +1500,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       if (ghostGroupRef.current) {
         ghostGroupRef.current.visible = false;
       }
+      if (magneticGuideGroupRef.current) {
+        magneticGuideGroupRef.current.visible = false;
+      }
       return;
     }
 
@@ -1218,6 +1510,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const targetCont0 = typeof currentTab === 'number' ? Math.max(0, currentTab - 1) : 0;
     const spacingM = (container.width / 1000) + 1.2;
     const targetOffsetZ = isSideBySide ? targetCont0 * spacingM : 0;
+    const activeOffsetZ = ghostCoords.offsetZ !== undefined ? ghostCoords.offsetZ : targetOffsetZ;
 
     let group = ghostGroupRef.current;
     if (!group) {
@@ -1237,20 +1530,71 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       }
     }
 
+    // Render Magnetic Edge Snap Contact Guide Lines in world space
+    let magGroup = magneticGuideGroupRef.current;
+    if (!magGroup) {
+      magGroup = new THREE.Group();
+      magGroup.name = 'magnetic-guide-group';
+      scene.add(magGroup);
+      magneticGuideGroupRef.current = magGroup;
+    }
+
+    while (magGroup.children.length > 0) {
+      const obj = magGroup.children[0];
+      magGroup.remove(obj);
+      if ((obj as any).geometry) (obj as any).geometry.dispose();
+      if ((obj as any).material) {
+        if (Array.isArray((obj as any).material)) (obj as any).material.forEach((m: any) => m.dispose());
+        else (obj as any).material.dispose();
+      }
+    }
+
+    const isSnapped = !!(ghostCoords.magneticSnap && (ghostCoords.magneticSnap.isSnappedX || ghostCoords.magneticSnap.isSnappedY));
+
+    if (ghostCoords.magneticSnap?.guideLines && ghostCoords.magneticSnap.guideLines.length > 0) {
+      for (const gLine of ghostCoords.magneticSnap.guideLines) {
+        // gLine start/end: [x, z, y] in meters in container local coordinates
+        const p1 = new THREE.Vector3(gLine.start[0], gLine.start[1] + 0.006, gLine.start[2] + activeOffsetZ);
+        const p2 = new THREE.Vector3(gLine.end[0], gLine.end[1] + 0.006, gLine.end[2] + activeOffsetZ);
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+        const lineMat = new THREE.LineBasicMaterial({
+          color: 0x06b6d4, // Vivid Cyan for Magnetic Snap contact edge
+          linewidth: 4,
+          transparent: true,
+          opacity: 0.95
+        });
+        const snapLine = new THREE.Line(lineGeo, lineMat);
+        magGroup.add(snapLine);
+
+        // Glowing contact endpoints
+        const markerGeo = new THREE.SphereGeometry(0.016, 8, 8);
+        const markerMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+        const m1 = new THREE.Mesh(markerGeo, markerMat);
+        m1.position.copy(p1);
+        const m2 = new THREE.Mesh(markerGeo, markerMat);
+        m2.position.copy(p2);
+        magGroup.add(m1);
+        magGroup.add(m2);
+      }
+      magGroup.visible = true;
+    } else {
+      magGroup.visible = false;
+    }
+
     const lenM = ghostCoords.length / 1000;
     const heiM = ghostCoords.height / 1000;
     const widM = ghostCoords.width / 1000;
 
     const boxGeo = new THREE.BoxGeometry(lenM, heiM, widM);
-    const colorHex = ghostCoords.isValid ? 0x10b981 : 0xef4444;
+    const colorHex = !ghostCoords.isValid ? 0xef4444 : (isSnapped ? 0x06b6d4 : 0x10b981);
     const boxMat = new THREE.MeshStandardMaterial({
       color: colorHex,
       transparent: true,
-      opacity: 0.65,
+      opacity: isSnapped ? 0.72 : 0.65,
       roughness: 0.2,
       metalness: 0.1,
       emissive: new THREE.Color(colorHex),
-      emissiveIntensity: 0.45
+      emissiveIntensity: isSnapped ? 0.6 : 0.45
     });
 
     const mesh = new THREE.Mesh(boxGeo, boxMat);
@@ -1258,28 +1602,144 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
     const edgesGeo = new THREE.EdgesGeometry(boxGeo);
     const edgeLineMat = new THREE.LineBasicMaterial({
-      color: ghostCoords.isValid ? 0x047857 : 0xb91c1c,
+      color: !ghostCoords.isValid ? 0xb91c1c : (isSnapped ? 0x22d3ee : 0x047857),
       linewidth: 3
     });
     const edgeLines = new THREE.LineSegments(edgesGeo, edgeLineMat);
     group.add(edgeLines);
 
-    const activeOffsetZ = ghostCoords.offsetZ !== undefined ? ghostCoords.offsetZ : targetOffsetZ;
+    // Floor footprint projection outline at container floor showing alignment
+    const footprintOffsetDown = (ghostCoords.z / 1000);
+    const footprintGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, -widM / 2),
+      new THREE.Vector3(lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, -widM / 2),
+      new THREE.Vector3(lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, widM / 2),
+      new THREE.Vector3(-lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, widM / 2),
+      new THREE.Vector3(-lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, -widM / 2),
+    ]);
+    const footprintMat = new THREE.LineBasicMaterial({
+      color: !ghostCoords.isValid ? 0xdc2626 : (isSnapped ? 0x0891b2 : 0x059669),
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.8
+    });
+    const footprintLine = new THREE.Line(footprintGeo, footprintMat);
+    group.add(footprintLine);
+
+    // If grid snap is enabled, show an alignment crosshair at footprint center
+    if (gridSnapMm > 0) {
+      const crossPoints: THREE.Vector3[] = [
+        new THREE.Vector3(-lenM * 0.25, -heiM / 2 - footprintOffsetDown + 0.004, 0),
+        new THREE.Vector3(lenM * 0.25, -heiM / 2 - footprintOffsetDown + 0.004, 0),
+        new THREE.Vector3(0, -heiM / 2 - footprintOffsetDown + 0.004, -widM * 0.25),
+        new THREE.Vector3(0, -heiM / 2 - footprintOffsetDown + 0.004, widM * 0.25),
+      ];
+      const crossGeo = new THREE.BufferGeometry().setFromPoints(crossPoints);
+      const crossMat = new THREE.LineBasicMaterial({
+        color: isSnapped ? 0x06b6d4 : 0x0284c7, // Cyan or Sky blue crosshair
+        linewidth: 2,
+        transparent: true,
+        opacity: 0.9
+      });
+      const crossLines = new THREE.LineSegments(crossGeo, crossMat);
+      group.add(crossLines);
+    }
+
     group.position.set(
       (ghostCoords.x + ghostCoords.length / 2) / 1000,
       (ghostCoords.z + ghostCoords.height / 2) / 1000,
       (ghostCoords.y + ghostCoords.width / 2) / 1000 + activeOffsetZ
     );
     group.visible = true;
-  }, [isManualMode, ghostCoords, currentTab, containers, container]);
+  }, [isManualMode, ghostCoords, currentTab, containers, container, gridSnapMm, magneticSnapMm]);
 
-  // Clean up ghost mesh on unmount
+  // Update Visual Snap Grid in 3D scene when snap is enabled
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (!snapGridGroupRef.current) {
+      const g = new THREE.Group();
+      g.name = 'snap-grid-group';
+      scene.add(g);
+      snapGridGroupRef.current = g;
+    }
+
+    const group = snapGridGroupRef.current;
+
+    // Clear existing grid lines
+    while (group.children.length > 0) {
+      const child = group.children[0];
+      group.remove(child);
+      if ((child as any).geometry) (child as any).geometry.dispose();
+      if ((child as any).material) {
+        if (Array.isArray((child as any).material)) (child as any).material.forEach((m: any) => m.dispose());
+        else (child as any).material.dispose();
+      }
+    }
+
+    // Only display 3D visual snap grid when in manual mode and snap > 0
+    if (!isManualMode || gridSnapMm <= 0) {
+      group.visible = false;
+      return;
+    }
+
+    group.visible = true;
+
+    const isSideBySide = currentTab === 'all' && containers && containers.length > 1;
+    const contCount = isSideBySide ? containers.length : 1;
+    const lenM = container.length / 1000;
+    const widM = container.width / 1000;
+    const spacingM = widM + 1.2;
+    const stepM = Math.max(0.01, gridSnapMm / 1000);
+
+    for (let c = 0; c < contCount; c++) {
+      const zOffsetM = isSideBySide ? c * spacingM : 0;
+      const points: THREE.Vector3[] = [];
+
+      // Avoid excessive lines for 1cm step on very long containers
+      const effectiveStep = (gridSnapMm < 20 && (lenM / stepM > 600)) ? 0.05 : stepM;
+
+      for (let x = 0; x <= lenM + 0.001; x += effectiveStep) {
+        points.push(new THREE.Vector3(x, 0.002, zOffsetM));
+        points.push(new THREE.Vector3(x, 0.002, widM + zOffsetM));
+      }
+      for (let z = 0; z <= widM + 0.001; z += effectiveStep) {
+        points.push(new THREE.Vector3(0, 0.002, z + zOffsetM));
+        points.push(new THREE.Vector3(lenM, 0.002, z + zOffsetM));
+      }
+
+      if (points.length > 0) {
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({
+          color: 0x0284c7, // Sky-600 metric snap grid
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false
+        });
+        const lines = new THREE.LineSegments(geo, mat);
+        group.add(lines);
+      }
+    }
+  }, [isManualMode, gridSnapMm, container, containers, currentTab]);
+
+  // Clean up ghost mesh and snap grid on unmount
   useEffect(() => {
     return () => {
       const scene = sceneRef.current;
-      if (scene && ghostGroupRef.current) {
-        scene.remove(ghostGroupRef.current);
-        ghostGroupRef.current = null;
+      if (scene) {
+        if (ghostGroupRef.current) {
+          scene.remove(ghostGroupRef.current);
+          ghostGroupRef.current = null;
+        }
+        if (snapGridGroupRef.current) {
+          scene.remove(snapGridGroupRef.current);
+          snapGridGroupRef.current = null;
+        }
+        if (magneticGuideGroupRef.current) {
+          scene.remove(magneticGuideGroupRef.current);
+          magneticGuideGroupRef.current = null;
+        }
       }
     };
   }, []);
@@ -1294,7 +1754,13 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const calculatePlacementAtMouse = (clientX: number, clientY: number, itemDim: { length: number; width: number; height: number; rotation: number }) => {
+    const calculatePlacementAtMouse = (
+      clientX: number,
+      clientY: number,
+      itemDim: { length: number; width: number; height: number; rotation: number },
+      overrideSnapMm?: number,
+      overrideMagSnapMm?: number
+    ) => {
       const rect = containerEl.getBoundingClientRect();
       mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
@@ -1343,9 +1809,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       let rawX = (hitPoint.x * 1000) - length / 2;
       let rawY = ((hitPoint.z - targetOffsetZ) * 1000) - width / 2;
 
-      if (gridSnapMm > 0) {
-        rawX = Math.round(rawX / gridSnapMm) * gridSnapMm;
-        rawY = Math.round(rawY / gridSnapMm) * gridSnapMm;
+      const activeSnapMm = overrideSnapMm !== undefined ? overrideSnapMm : gridSnapMm;
+
+      if (activeSnapMm > 0) {
+        rawX = Math.round(rawX / activeSnapMm) * activeSnapMm;
+        rawY = Math.round(rawY / activeSnapMm) * activeSnapMm;
+      } else {
+        rawX = Math.round(rawX);
+        rawY = Math.round(rawY);
       }
 
       rawX = Math.max(0, Math.min(container.length - length, rawX));
@@ -1356,16 +1827,49 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         : null;
       const contItems = activeContLoad ? activeContLoad.packedItems : packedItems;
       const ignoreId = isDraggingExistingItem ? isDraggingExistingItem.id : undefined;
-      const rawZ = calculateSupportHeight(rawX, rawY, length, width, contItems, ignoreId);
+      const targetCont = activeContLoad?.container || container;
 
-      const bounds = checkContainerBounds(rawX, rawY, rawZ, length, width, height, container);
-      const restingOnFragile = isRestingOnFragile(rawX, rawY, rawZ, length, width, contItems, ignoreId);
-      const collisionCheck = check3DItemCollision(rawX, rawY, rawZ, length, width, height, contItems, ignoreId);
+      // Magnetic snap calculation (snaps flush to adjacent cargo edges, container walls, alignments)
+      let finalX = rawX;
+      let finalY = rawY;
+      let finalZ = calculateSupportHeight(rawX, rawY, length, width, contItems, ignoreId);
+      let magResult: MagneticSnapCandidate | undefined;
+
+      const activeMagMm = overrideMagSnapMm !== undefined ? overrideMagSnapMm : magneticSnapMm;
+
+      if (activeMagMm > 0) {
+        magResult = applyMagneticEdgeSnap(
+          rawX,
+          rawY,
+          length,
+          width,
+          height,
+          contItems,
+          targetCont,
+          {
+            thresholdMm: activeMagMm,
+            ignoreItemId: ignoreId,
+            snapToAdjacentCargo: true,
+            snapToWalls: true,
+            snapToAlignments: true
+          }
+        );
+
+        if (magResult.isSnappedX || magResult.isSnappedY) {
+          finalX = magResult.x;
+          finalY = magResult.y;
+          finalZ = magResult.z;
+        }
+      }
+
+      const bounds = checkContainerBounds(finalX, finalY, finalZ, length, width, height, targetCont);
+      const restingOnFragile = isRestingOnFragile(finalX, finalY, finalZ, length, width, contItems, ignoreId);
+      const collisionCheck = check3DItemCollision(finalX, finalY, finalZ, length, width, height, contItems, ignoreId);
 
       // Check container payload capacity if maxWeight is defined
       const itemWeight = heldUnplacedItem?.unplaced.weight ?? isDraggingExistingItem?.weight ?? 0;
       const currentContWeight = contItems.reduce((s, i) => (ignoreId && i.id === ignoreId ? s : s + i.weight), 0);
-      const exceedsWeight = container.maxWeight > 0 && (currentContWeight + itemWeight) > container.maxWeight;
+      const exceedsWeight = targetCont.maxWeight > 0 && (currentContWeight + itemWeight) > targetCont.maxWeight;
 
       let invalidReason: string | undefined;
       if (!bounds.isValid) {
@@ -1387,16 +1891,17 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const isValid = bounds.isValid && !restingOnFragile && !exceedsWeight && !collisionCheck.hasCollision;
 
       return {
-        x: rawX,
-        y: rawY,
-        z: rawZ,
+        x: finalX,
+        y: finalY,
+        z: finalZ,
         length,
         width,
         height,
         isValid,
         invalidReason,
         offsetZ: targetOffsetZ,
-        containerIndex: targetContNum
+        containerIndex: targetContNum,
+        magneticSnap: magResult
       };
     };
 
@@ -1420,7 +1925,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           rotation: 0
         };
 
-        const result = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim);
+        const effectiveSnapMm = event.altKey 
+          ? (gridSnapMm > 0 ? 0 : (lastNonZeroGridSnapMm.current || 50)) 
+          : gridSnapMm;
+        const effectiveMagSnapMm = event.altKey ? 0 : magneticSnapMm;
+        const result = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim, effectiveSnapMm, effectiveMagSnapMm);
         if (result) {
           setGhostCoords(result);
           containerEl.style.cursor = 'crosshair';
@@ -1467,7 +1976,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           height: isDraggingExistingItem.height,
           rotation: 0
         };
-        const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim);
+        const effectiveSnapMm = event.altKey 
+          ? (gridSnapMm > 0 ? 0 : (lastNonZeroGridSnapMm.current || 50)) 
+          : gridSnapMm;
+        const effectiveMagSnapMm = event.altKey ? 0 : magneticSnapMm;
+        const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim, effectiveSnapMm, effectiveMagSnapMm);
         if (place) {
           if (!place.isValid) {
             showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot move item: exceeds container constraints'));
@@ -1482,9 +1995,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             height: place.height,
             rotationIndex: isDraggingExistingItem.rotationIndex
           });
+
+          const snapDesc = place.magneticSnap && (place.magneticSnap.isSnappedX || place.magneticSnap.isSnappedY)
+            ? (place.magneticSnap.snappedItem
+                ? (language === 'ja' ? ` (🧲「${place.magneticSnap.snappedItem.name}」の端面に吸着)` : ` (🧲 Snapped to "${place.magneticSnap.snappedItem.name}")`)
+                : (language === 'ja' ? ' (🧲 端面吸着)' : ' (🧲 Edge snapped)'))
+            : '';
+
           showToast(language === 'ja'
-            ? `「${isDraggingExistingItem.name}」の位置を変更しました (X:${place.x} Y:${place.y} Z:${place.z}mm)`
-            : `Moved "${isDraggingExistingItem.name}" to (X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
+            ? `「${isDraggingExistingItem.name}」の位置を変更しました (X:${formatMeters(place.x)}m Y:${formatMeters(place.y)}m Z:${formatMeters(place.z)}m)${snapDesc}`
+            : `Moved "${isDraggingExistingItem.name}" to (X:${formatMeters(place.x)}m, Y:${formatMeters(place.y)}m, Z:${formatMeters(place.z)}m)${snapDesc}`);
           setIsDraggingExistingItem(null);
           setGhostCoords(null);
           return;
@@ -1499,7 +2019,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           height: heldUnplacedItem.unplaced.dimensions.height,
           rotation: heldUnplacedItem.rotation
         };
-        const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim);
+        const effectiveSnapMm = event.altKey 
+          ? (gridSnapMm > 0 ? 0 : (lastNonZeroGridSnapMm.current || 50)) 
+          : gridSnapMm;
+        const effectiveMagSnapMm = event.altKey ? 0 : magneticSnapMm;
+        const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim, effectiveSnapMm, effectiveMagSnapMm);
         if (place) {
           if (!place.isValid) {
             showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot place item: exceeds container limits'));
@@ -1518,9 +2042,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             color: heldUnplacedItem.color,
             containerIndex: targetContNum
           });
+
+          const snapDesc = place.magneticSnap && (place.magneticSnap.isSnappedX || place.magneticSnap.isSnappedY)
+            ? (place.magneticSnap.snappedItem
+                ? (language === 'ja' ? ` (🧲「${place.magneticSnap.snappedItem.name}」の端面に吸着)` : ` (🧲 Snapped to "${place.magneticSnap.snappedItem.name}")`)
+                : (language === 'ja' ? ' (🧲 端面吸着)' : ' (🧲 Edge snapped)'))
+            : '';
+
           showToast(language === 'ja' 
-            ? `「${heldUnplacedItem.unplaced.name}」を手動配置しました (コンテナ#${targetContNum} X:${place.x} Y:${place.y} Z:${place.z}mm)`
-            : `Manually placed "${heldUnplacedItem.unplaced.name}" (Cont #${targetContNum} X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
+            ? `「${heldUnplacedItem.unplaced.name}」を手動配置しました (コンテナ#${targetContNum} X:${formatMeters(place.x)}m Y:${formatMeters(place.y)}m Z:${formatMeters(place.z)}m)${snapDesc}`
+            : `Manually placed "${heldUnplacedItem.unplaced.name}" (Cont #${targetContNum} X:${formatMeters(place.x)}m, Y:${formatMeters(place.y)}m, Z:${formatMeters(place.z)}m)${snapDesc}`);
           
           if (heldUnplacedItem.unplaced.count <= 1) {
             setHeldUnplacedItem(null);
@@ -1582,7 +2113,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           height: draggedUnplacedRef.current.unplaced.dimensions.height,
           rotation: draggedUnplacedRef.current.rotation
         };
-        const result = calculatePlacementAtMouse(e.clientX, e.clientY, itemDim);
+        const effectiveSnapMm = e.altKey 
+          ? (gridSnapMm > 0 ? 0 : (lastNonZeroGridSnapMm.current || 50)) 
+          : gridSnapMm;
+        const effectiveMagSnapMm = e.altKey ? 0 : magneticSnapMm;
+        const result = calculatePlacementAtMouse(e.clientX, e.clientY, itemDim, effectiveSnapMm, effectiveMagSnapMm);
         if (result) {
           setGhostCoords(result);
           containerEl.style.cursor = 'copy';
@@ -1600,7 +2135,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           height: dragged.unplaced.dimensions.height,
           rotation: dragged.rotation
         };
-        const place = calculatePlacementAtMouse(e.clientX, e.clientY, itemDim);
+        const effectiveSnapMm = e.altKey 
+          ? (gridSnapMm > 0 ? 0 : (lastNonZeroGridSnapMm.current || 50)) 
+          : gridSnapMm;
+        const effectiveMagSnapMm = e.altKey ? 0 : magneticSnapMm;
+        const place = calculatePlacementAtMouse(e.clientX, e.clientY, itemDim, effectiveSnapMm, effectiveMagSnapMm);
         if (place) {
           if (!place.isValid) {
             showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot drop item: exceeds container limits'));
@@ -1621,9 +2160,16 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             color: dragged.color,
             containerIndex: targetContNum
           });
+
+          const snapDesc = place.magneticSnap && (place.magneticSnap.isSnappedX || place.magneticSnap.isSnappedY)
+            ? (place.magneticSnap.snappedItem
+                ? (language === 'ja' ? ` (🧲「${place.magneticSnap.snappedItem.name}」の端面に吸着)` : ` (🧲 Snapped to "${place.magneticSnap.snappedItem.name}")`)
+                : (language === 'ja' ? ' (🧲 端面吸着)' : ' (🧲 Edge snapped)'))
+            : '';
+
           showToast(language === 'ja' 
-            ? `「${dragged.unplaced.name}」をドロップ配置しました (コンテナ#${targetContNum} X:${place.x} Y:${place.y} Z:${place.z}mm)`
-            : `Dropped "${dragged.unplaced.name}" (Cont #${targetContNum} X:${place.x}, Y:${place.y}, Z:${place.z}mm)`);
+            ? `「${dragged.unplaced.name}」をドロップ配置しました (コンテナ#${targetContNum} X:${formatMeters(place.x)}m Y:${formatMeters(place.y)}m Z:${formatMeters(place.z)}m)${snapDesc}`
+            : `Dropped "${dragged.unplaced.name}" (Cont #${targetContNum} X:${formatMeters(place.x)}m, Y:${formatMeters(place.y)}m, Z:${formatMeters(place.z)}m)${snapDesc}`);
         }
         setGhostCoords(null);
         draggedUnplacedRef.current = null;
@@ -1670,12 +2216,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         return;
       }
 
-      // Escape or Cancel (C / Q) key handling - HIGHEST PRIORITY
+      // Escape or Cancel (C) key handling - HIGHEST PRIORITY
       const isEscape = e.key === 'Escape' || e.key === 'Esc' || e.code === 'Escape';
       const isCancelKey = (e.key === 'c' || e.key === 'C' || e.code === 'KeyC') && !e.ctrlKey && !e.metaKey && !e.altKey;
       const isQuitKey = (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ') && !e.ctrlKey && !e.metaKey && !e.altKey;
 
-      if (isEscape || ((isCancelKey || isQuitKey) && (heldUnplacedItemRef.current || isDraggingExistingItemRef.current || draggedUnplacedRef.current))) {
+      if (isEscape || (isCancelKey && (heldUnplacedItemRef.current || isDraggingExistingItemRef.current || draggedUnplacedRef.current))) {
         e.preventDefault();
         e.stopPropagation();
 
@@ -1715,6 +2261,20 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         ? activeSelectedItemRef.current
         : (rawTarget ? (packedItems.find(p => p.id === rawTarget.id) || rawTarget) : null);
 
+      // S key: Toggle Grid Snap between incremental snapping and free-form placement
+      if (isManualMode && (e.key === 's' || e.key === 'S' || e.code === 'KeyS') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleGridSnap();
+        return;
+      }
+
+      // B key: Toggle Magnetic Snap between adjacent cargo edge snap and off
+      if (isManualMode && (e.key === 'b' || e.key === 'B' || e.code === 'KeyB') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleMagneticSnap();
+        return;
+      }
+
       if (e.key === 'r' || e.key === 'R') {
         if (heldUnplacedItem) {
           setHeldUnplacedItem(prev => prev ? { ...prev, rotation: prev.rotation === 0 ? 1 : 0 } : null);
@@ -1742,9 +2302,31 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         }
       } else if (e.key === ' ' || e.key === 'd' || e.key === 'D') {
         // Space or 'D': Gravity Drop selected item to nearest support/floor
-        if (isManualMode && currentSelected) {
+        if (isManualMode) {
           e.preventDefault();
-          handleDropItemToSupport(currentSelected);
+          if (heldUnplacedItem) {
+            // If holding an unplaced item, Space rotates it 90 degrees
+            setHeldUnplacedItem(prev => prev ? { ...prev, rotation: prev.rotation === 0 ? 1 : 0 } : null);
+            showToast(isJa ? '配置向きを90°回転しました (Space / R)' : 'Rotated placement orientation 90° (Space / R)');
+          } else if (currentSelected) {
+            handleDropItemToSupport(currentSelected);
+          } else {
+            showToast(isJa 
+              ? '着地させる荷物をクリックして選択してください' 
+              : 'Please select a cargo item to drop');
+          }
+        }
+      } else if (isQuitKey) {
+        // Q key: Instantly snap selected cargo to deepest back-left available position
+        if (isManualMode) {
+          e.preventDefault();
+          if (currentSelected) {
+            handleMoveToDeepestBackLeft(currentSelected);
+          } else {
+            showToast(isJa
+              ? '奥左へ移動させる荷物をクリックして選択してください (Qキー)'
+              : 'Please select a cargo item to move back-left (Q key)');
+          }
         }
       } else if (
         isManualMode && 
@@ -1908,9 +2490,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     };
   }, [
     isManualMode, heldUnplacedItem, isDraggingExistingItem, currentTab, containers, 
-    container, gridSnapMm, onManualPlaceItem, onManualMoveItem, onManualRemoveItem, 
+    container, gridSnapMm, magneticSnapMm, toggleGridSnap, toggleMagneticSnap, onManualPlaceItem, onManualMoveItem, onManualRemoveItem, 
     onSelectItem, externalSelectedItem, internalSelectedItem, language, showToast, packedItems,
-    onUndo, onRedo, canUndo, canRedo, handleDropItemToSupport, cancelPlacementMode
+    onUndo, onRedo, canUndo, canRedo, handleDropItemToSupport, handleMoveToDeepestBackLeft, cancelPlacementMode
   ]);
 
   // Camera preset views
@@ -1998,72 +2580,139 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
       {/* Top Floating Container Selector Tabs & Quick Badges */}
       <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none gap-2 z-10 min-w-0">
-        <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-800 min-w-0 max-w-[calc(100%-240px)] sm:max-w-[calc(100%-290px)]">
+        <div className="flex items-center gap-1 sm:gap-1.5 pointer-events-auto bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm text-xs text-slate-800 min-w-0 max-w-[calc(100%-140px)] sm:max-w-[calc(100%-200px)] md:max-w-[calc(100%-240px)]">
           <Box className="w-4 h-4 text-blue-600 shrink-0" />
-          <span className="font-semibold text-slate-900 shrink-0 hidden md:inline">{container.name}</span>
+          <span 
+            className="font-semibold text-slate-900 truncate max-w-[100px] sm:max-w-[140px] md:max-w-[190px] shrink min-w-0 hidden sm:inline"
+            title={container.name}
+          >
+            {container.name}
+          </span>
 
           {hasMultipleContainers ? (
-            <div className="flex items-center gap-0.5 sm:gap-1 ml-1 sm:ml-2 border-l border-slate-200 pl-1 sm:pl-2 min-w-0">
-              {containers.length > 5 && (
-                <button
-                  type="button"
-                  onClick={() => containerTabsScrollRef.current?.scrollBy({ left: -100, behavior: 'smooth' })}
-                  className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors cursor-pointer"
-                  title={isJa ? '前のコンテナへスクロール' : 'Scroll left'}
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
-              )}
+            <div className="flex items-center gap-1 ml-1 sm:ml-2 border-l border-slate-200 pl-1 sm:pl-2 shrink-0">
+              {containers.length <= 4 ? (
+                // 2-4 Containers: Direct tabs for fast 1-click access
+                <div className="flex items-center gap-1 shrink-0">
+                  {containers.map((cLoad, idx) => {
+                    const cIndex = cLoad.containerIndex || (idx + 1);
+                    const isActive = currentTab === cIndex;
+                    return (
+                      <button
+                        key={cIndex}
+                        type="button"
+                        onClick={() => setTab(cIndex)}
+                        title={isJa ? `コンテナ #${cIndex} (容積充填率: ${(cLoad.metrics?.volumeUtilization || 0).toFixed(1)}%)` : `Container #${cIndex} (Volume Utilization: ${(cLoad.metrics?.volumeUtilization || 0).toFixed(1)}%)`}
+                        className={`px-2 py-0.5 rounded text-[11px] font-bold shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        #{cIndex} ({(cLoad.metrics?.volumeUtilization || 0).toFixed(0)}%)
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setTab(currentTab === 'all' ? 1 : 'all')}
+                    title={isJa ? '全台並列表示切替' : 'Toggle Side-by-Side'}
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                      currentTab === 'all'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Grid3X3 className="w-3 h-3" />
+                    <span className="hidden sm:inline">{isJa ? '並列' : 'Side-by-Side'}</span>
+                  </button>
+                </div>
+              ) : (
+                // 5+ Containers: Compact carousel with full container number & quick select dropdown
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handlePrevContainer}
+                    className="p-1 rounded hover:bg-slate-100 text-slate-600 hover:text-slate-900 shrink-0 transition-colors cursor-pointer"
+                    title={isJa ? '前のコンテナへ (←)' : 'Previous container'}
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
 
-              <div 
-                ref={containerTabsScrollRef}
-                className="flex items-center gap-1 overflow-x-auto no-scrollbar scroll-smooth py-0.5 max-w-[28vw] sm:max-w-[36vw] md:max-w-[42vw] lg:max-w-[48vw]"
-              >
-                {containers.map((cLoad, idx) => {
-                  const cIndex = cLoad.containerIndex || (idx + 1);
-                  const isActive = currentTab === cIndex;
-                  return (
+                  <div className="relative inline-flex items-center">
                     <button
-                      key={cIndex}
                       type="button"
-                      onClick={() => setTab(cIndex)}
-                      className={`px-2 py-0.5 rounded text-[11px] font-bold shrink-0 whitespace-nowrap transition-all ${
-                        isActive
+                      className={`px-2.5 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                        currentTab !== 'all'
                           ? 'bg-slate-900 text-white shadow-xs'
                           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                       }`}
+                      title={isJa ? 'クリックでコンテナを直接選択' : 'Click to select container'}
                     >
-                      #{cIndex} ({(cLoad.metrics.volumeUtilization || 0).toFixed(0)}%)
+                      <span>
+                        {currentTab === 'all'
+                          ? (isJa ? `全台並列 (${containers.length}台)` : `All (${containers.length})`)
+                          : (isJa 
+                              ? `コンテナ #${currentTab} / ${containers.length} (${currentActiveUtilization.toFixed(0)}%)` 
+                              : `Cont #${currentTab} / ${containers.length} (${currentActiveUtilization.toFixed(0)}%)`
+                            )
+                        }
+                      </span>
+                      <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
                     </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => setTab('all')}
-                  className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap transition-all ${
-                    currentTab === 'all'
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                  }`}
-                >
-                  <Grid3X3 className="w-3 h-3" />
-                  <span>{isJa ? '全台並列' : 'Side-by-Side'}</span>
-                </button>
-              </div>
+                    <select
+                      id="top-container-dropdown-select"
+                      value={currentTab}
+                      onChange={(e) => setTab(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                      className="opacity-0 absolute inset-0 w-full h-full cursor-pointer z-10"
+                      title={isJa ? 'コンテナ切り替え' : 'Switch container'}
+                    >
+                      {containers.map((c, idx) => {
+                        const cIdx = c.containerIndex || (idx + 1);
+                        const util = (c.metrics?.volumeUtilization || 0).toFixed(0);
+                        const itemCount = c.packedItems?.length || 0;
+                        return (
+                          <option key={cIdx} value={cIdx}>
+                            {isJa 
+                              ? `コンテナ #${cIdx} (${util}% 充填 • ${itemCount}個)` 
+                              : `Container #${cIdx} (${util}% • ${itemCount} items)`}
+                          </option>
+                        );
+                      })}
+                      <option value="all">
+                        {isJa ? `全台並列 (${containers.length}台一括表示)` : `Side-by-Side (All ${containers.length} containers)`}
+                      </option>
+                    </select>
+                  </div>
 
-              {containers.length > 5 && (
-                <button
-                  type="button"
-                  onClick={() => containerTabsScrollRef.current?.scrollBy({ left: 100, behavior: 'smooth' })}
-                  className="p-1 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors cursor-pointer"
-                  title={isJa ? '次のコンテナへスクロール' : 'Scroll right'}
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleNextContainer}
+                    className="p-1 rounded hover:bg-slate-100 text-slate-600 hover:text-slate-900 shrink-0 transition-colors cursor-pointer"
+                    title={isJa ? '次のコンテナへ (→)' : 'Next container'}
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    id="top-side-by-side-btn"
+                    onClick={() => setTab(currentTab === 'all' ? 1 : 'all')}
+                    title={isJa ? '全台並列表示切替' : 'Toggle Side-by-Side'}
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 shrink-0 whitespace-nowrap transition-all cursor-pointer ${
+                      currentTab === 'all'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Grid3X3 className="w-3 h-3" />
+                    <span className="hidden sm:inline">{isJa ? '並列' : 'Side-by-Side'}</span>
+                  </button>
+                </div>
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
+            <div className="flex items-center gap-1 ml-1 sm:ml-2 border-l border-slate-200 pl-1 sm:pl-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setTab(1)}
@@ -2082,12 +2731,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         </div>
 
         {/* Top-Right Viewer Toolbar */}
-        <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-lg border border-slate-200 shadow-sm text-xs shrink-0 z-10">
+        <div className="flex items-center gap-1 pointer-events-auto bg-white/95 backdrop-blur-md px-1.5 py-1 rounded-lg border border-slate-200 shadow-sm text-xs shrink-0 z-10">
           <button
             id="toggle-slice-controls-btn"
             onClick={() => setShowSliceControls(!showSliceControls)}
             title={isJa ? '操作・視点・表示設定 (Vivid・半透明・断面・シミュレーション)' : 'Controls, Display & Slicing Settings'}
-            className={`px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-1.5 font-bold ${
+            className={`px-2 py-0.5 rounded-md transition-colors flex items-center gap-1.5 font-bold ${
               showSliceControls 
                 ? 'bg-slate-900 text-white shadow-2xs' 
                 : (zSlicePercent < 100 || xSlicePercent < 100 || isPlaying)
@@ -2096,7 +2745,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             }`}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="text-xs">{isJa ? '操作・表示設定' : 'Controls'}</span>
+            <span className="text-xs hidden md:inline">{isJa ? '表示設定' : 'Controls'}</span>
             {!showSliceControls && (isVividBoost || isTranslucent || zSlicePercent < 100 || xSlicePercent < 100 || isPlaying) && (
               <span className="flex items-center gap-1 ml-0.5">
                 {isVividBoost && (
@@ -2119,7 +2768,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               }
             }}
             title={isJa ? '手動調整モード切替 (Mキーで切替)' : 'Toggle Manual Adjustment Mode (M key)'}
-            className={`px-2.5 py-1.5 rounded-md transition-all flex items-center gap-1.5 font-bold ${
+            className={`px-2 py-0.5 rounded-md transition-all flex items-center gap-1.5 font-bold ${
               isManualMode
                 ? 'bg-amber-500 text-slate-950 shadow-xs ring-2 ring-amber-400/70'
                 : hasManualAdjustments
@@ -2128,7 +2777,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             }`}
           >
             <Hand className={`w-3.5 h-3.5 ${isManualMode ? 'text-slate-950' : 'text-amber-500'}`} />
-            <span className="text-xs">{isJa ? '手動調整' : 'Manual'}</span>
+            <span className="text-xs hidden sm:inline">{isJa ? '手動調整' : 'Manual'}</span>
             <kbd className={`px-1 py-0.2 rounded text-[9px] font-mono font-bold ${isManualMode ? 'bg-amber-600/30 text-slate-950' : 'bg-slate-200 text-slate-600'}`}>M</kbd>
             {hasManualAdjustments && (
               <span className="px-1.5 py-0.2 rounded-full bg-amber-200 text-amber-900 text-[10px] font-bold">
@@ -2136,12 +2785,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               </span>
             )}
           </button>
-          <div className="w-px h-4 bg-slate-200 mx-0.5" />
+          <div className="w-px h-3.5 bg-slate-200 mx-0.5" />
           <button
             id="toggle-cog-btn"
             onClick={() => setShowCoG(!showCoG)}
             title={isJa ? '重心マーカー表示切替' : 'Toggle Center of Gravity'}
-            className={`p-1.5 rounded-md transition-colors ${showCoG ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+            className={`p-1 rounded-md transition-colors ${showCoG ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
           >
             <Crosshair className="w-3.5 h-3.5" />
           </button>
@@ -2149,7 +2798,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             id="snapshot-3d-btn"
             onClick={captureSnapshot}
             title={isJa ? '3D画像保存 (PNG)' : 'Save 3D Snapshot'}
-            className="p-1.5 rounded-md hover:bg-slate-100 text-slate-700 transition-colors"
+            className="p-1 rounded-md hover:bg-slate-100 text-slate-700 transition-colors"
           >
             <Camera className="w-3.5 h-3.5" />
           </button>
@@ -2160,7 +2809,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               ? (isFullScreen ? '全画面表示を解除 (Esc)' : '全画面表示') 
               : (isFullScreen ? 'Exit Full Screen (Esc)' : 'Full Screen')
             }
-            className={`p-1.5 rounded-md transition-colors ${
+            className={`p-1 rounded-md transition-colors ${
               isFullScreen 
                 ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-xs' 
                 : 'hover:bg-slate-100 text-slate-600'
@@ -2168,12 +2817,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           >
             {isFullScreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
-          <div className="w-px h-4 bg-slate-200 mx-0.5" />
+          <div className="w-px h-3.5 bg-slate-200 mx-0.5" />
           <button
             id="shortcuts-help-btn"
             onClick={() => setShowShortcutsHelp(true)}
             title={isJa ? '操作・ショートカット一覧ヘルプ (?)' : 'Keyboard Shortcuts Help (?)'}
-            className="p-1.5 rounded-md hover:bg-amber-100 text-slate-700 hover:text-amber-900 transition-colors flex items-center justify-center"
+            className="p-1 rounded-md hover:bg-amber-100 text-slate-700 hover:text-amber-900 transition-colors flex items-center justify-center"
           >
             <HelpCircle className="w-3.5 h-3.5" />
           </button>
@@ -2184,39 +2833,39 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       {isManualMode && (
         <div 
           id="manual-mode-active-banner"
-          className="absolute top-14 left-3 right-3 pointer-events-auto bg-amber-50/95 backdrop-blur-md px-3.5 py-2 rounded-xl border border-amber-300 shadow-md text-xs z-20 animate-fade-in flex items-center justify-between gap-3 text-slate-900 flex-wrap"
+          className="absolute top-14 left-3 right-3 pointer-events-auto bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-200 shadow-md text-xs z-20 animate-fade-in flex items-center justify-between gap-3 text-slate-800 flex-wrap"
         >
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="flex items-center gap-1 bg-amber-500 text-slate-950 px-2 py-0.5 rounded font-bold text-[11px] shadow-2xs">
-              <Hand className="w-3.5 h-3.5" />
-              {isJa ? '手動調整モード中' : 'Manual Mode Active'}
+            <span className="flex items-center gap-1 bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-md font-bold text-[11px]">
+              <Hand className="w-3.5 h-3.5 text-amber-700" />
+              {isJa ? '手動調整モード' : 'Manual Mode'}
             </span>
-            <span className="text-[11px] text-amber-950 font-medium">
+            <span className="text-[11px] text-slate-600 font-medium">
               {heldUnplacedItem ? (
-                <span className="font-bold text-amber-900 flex items-center gap-1">
-                  <ArrowDownToLine className="w-3.5 h-3.5 text-amber-600 animate-bounce" />
+                <span className="font-semibold text-slate-800 flex items-center gap-1">
+                  <ArrowDownToLine className="w-3.5 h-3.5 text-blue-600 animate-bounce" />
                   {isJa 
-                    ? `配置位置を選択中: 「${heldUnplacedItem.unplaced.name}」 3Dビュー内をクリックで配置確定 / [R]で回転` 
-                    : `Positioning "${heldUnplacedItem.unplaced.name}" - Click 3D view to place / [R] to rotate`}
+                    ? `配置位置を選択中: 「${heldUnplacedItem.unplaced.name}」 3D内クリックで確定 / [R]で回転` 
+                    : `Positioning: "${heldUnplacedItem.unplaced.name}" - Click 3D view to place / [R] rotate`}
                 </span>
               ) : activeSelectedItem ? (
-                <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                <span className="font-medium text-slate-800 flex items-center gap-1.5">
                   <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0 border border-black/15" style={{ backgroundColor: activeSelectedItem.color }} />
-                  {isJa
-                    ? `「${activeSelectedItem.name}」選択中: [↑↓←→] 微動 / [Shift+↑↓] 昇降 / [Space] 着地 / [R] 回転`
-                    : `"${activeSelectedItem.name}" selected: [Arrows] Nudge / [Shift+Up/Dn] Elevate / [Space] Drop / [R] Rotate`}
+                  <span className="font-semibold truncate max-w-[140px] sm:max-w-[200px]">{activeSelectedItem.name}</span>
+                  <span className="text-slate-400">|</span>
+                  <span className="text-slate-600">{isJa ? '[Q] 一番奥左へ移動 / [Space] 着地 / [R] 回転 / [矢印] 微動' : '[Q] Deepest Back-Left / [Space] Drop / [R] Rotate / [Arrows] Nudge'}</span>
                 </span>
               ) : (
                 isJa 
-                  ? '未積載トレイの荷物を配置、または積載済みの荷物をクリックして選択（矢印キー微動・Spaceで着地）' 
-                  : 'Place tray items, or click packed cargo to select (Arrow keys nudge, Space to drop)'
+                  ? '未積載トレイの荷物を配置、または積載済みの荷物をクリックして選択' 
+                  : 'Place tray items, or click packed cargo to select'
               )}
             </span>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {/* Undo / Redo buttons */}
-            <div className="flex items-center gap-0.5 bg-white border border-amber-300 rounded-md p-0.5 shadow-2xs">
+            <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 shadow-2xs">
               <button
                 id="banner-undo-btn"
                 type="button"
@@ -2230,13 +2879,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     showToast(isJa ? '操作を元に戻しました (Ctrl+Z)' : 'Undid adjustment (Ctrl+Z)');
                   }
                 }}
-                title={isJa ? '元に戻す (ショートカット: Ctrl+Z / ⌘Z)' : 'Undo (Shortcut: Ctrl+Z / ⌘Z)'}
-                className="px-2 py-1 rounded text-slate-800 hover:bg-amber-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer disabled:pointer-events-none"
+                title={isJa ? '元に戻す (Ctrl+Z)' : 'Undo (Ctrl+Z)'}
+                className="h-7 px-2 rounded-md text-slate-700 hover:text-slate-900 hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-1 text-[11px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
               >
-                <Undo2 className="w-3.5 h-3.5 text-amber-800" />
-                <span>{isJa ? '元に戻す' : 'Undo'}</span>
+                <Undo2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>{isJa ? '戻す' : 'Undo'}</span>
               </button>
-              <div className="w-[1px] h-3.5 bg-amber-200" />
               <button
                 id="banner-redo-btn"
                 type="button"
@@ -2250,10 +2898,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                     showToast(isJa ? '操作をやり直しました (Ctrl+Y)' : 'Redid adjustment (Ctrl+Y)');
                   }
                 }}
-                title={isJa ? 'やり直す (ショートカット: Ctrl+Y / ⌘Shift+Z)' : 'Redo (Shortcut: Ctrl+Y / ⌘Shift+Z)'}
-                className="px-2 py-1 rounded text-slate-800 hover:bg-amber-100 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed flex items-center gap-1 text-[11px] font-bold transition-colors cursor-pointer disabled:pointer-events-none"
+                title={isJa ? 'やり直す (Ctrl+Y)' : 'Redo (Ctrl+Y)'}
+                className="h-7 px-2 rounded-md text-slate-700 hover:text-slate-900 hover:bg-white disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-1 text-[11px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
               >
-                <Redo2 className="w-3.5 h-3.5 text-amber-800" />
+                <Redo2 className="w-3.5 h-3.5 text-slate-500" />
                 <span>{isJa ? 'やり直す' : 'Redo'}</span>
               </button>
             </div>
@@ -2261,7 +2909,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             {/* Rotate item */}
             <button
               id="banner-rotate-btn"
-              onClick={() => {
+              onClick={(e) => {
+                e.currentTarget.blur();
                 if (heldUnplacedItem) {
                   setHeldUnplacedItem(prev => prev ? { ...prev, rotation: prev.rotation === 0 ? 1 : 0 } : null);
                 } else if (activeSelectedItem && onManualMoveItem) {
@@ -2277,39 +2926,117 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   showToast(isJa ? `90°回転しました` : `Rotated 90°`);
                 }
               }}
-              title={isJa ? '荷物を90°回転 (ショートカット: R)' : 'Rotate 90 degrees (Shortcut: R)'}
-              className="px-2 py-1 rounded-md bg-white border border-amber-300 text-slate-800 hover:bg-amber-100 flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors cursor-pointer"
+              title={isJa ? '荷物を90°回転 (R)' : 'Rotate 90° (R)'}
+              className="h-7 px-2 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 flex items-center gap-1 text-[11px] font-medium shadow-2xs transition-colors cursor-pointer"
             >
-              <RotateCw className="w-3 h-3 text-amber-700" />
-              <span>{isJa ? '90°回転 (R)' : 'Rotate (R)'}</span>
+              <RotateCw className="w-3 h-3 text-slate-500" />
+              <span>{isJa ? '回転 (R)' : 'Rotate (R)'}</span>
             </button>
 
             {/* Gravity Drop (Landing) button when cargo is selected */}
             {activeSelectedItem && (
-              <button
-                id="banner-drop-btn"
-                onClick={() => handleDropItemToSupport(activeSelectedItem)}
-                title={isJa ? '真下の床・荷物の天面まで着地 (ショートカット: Space / D)' : 'Drop onto floor or underlying cargo (Shortcut: Space / D)'}
-                className="px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors cursor-pointer"
-              >
-                <ArrowDownToLine className="w-3 h-3" />
-                <span>{isJa ? '直下へ着地 (Space)' : 'Drop (Space)'}</span>
-              </button>
+              <>
+                <button
+                  id="banner-snap-backleft-btn"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    handleMoveToDeepestBackLeft(activeSelectedItem);
+                  }}
+                  title={isJa ? '一番奥左の置ける場所まで一気に移動 (Qキー)' : 'Snap to deepest back-left position (Q key)'}
+                  className="h-7 px-2 rounded-lg bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-900 border border-amber-300 flex items-center gap-1 text-[11px] font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  <ArrowDownToLine className="w-3 h-3 text-amber-700 rotate-45" />
+                  <span>{isJa ? '奥左詰 (Q)' : 'Back-Left (Q)'}</span>
+                </button>
+
+                <button
+                  id="banner-drop-btn"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    handleDropItemToSupport(activeSelectedItem);
+                  }}
+                  title={isJa ? '真下の床・荷物天面まで着地 (Space / D)' : 'Drop onto floor or cargo (Space / D)'}
+                  className="h-7 px-2 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 flex items-center gap-1 text-[11px] font-medium shadow-2xs transition-colors cursor-pointer"
+                >
+                  <ArrowDownToLine className="w-3 h-3 text-slate-500" />
+                  <span>{isJa ? '着地 (Space)' : 'Drop (Space)'}</span>
+                </button>
+              </>
             )}
 
-            {/* Grid Snap selector */}
-            <div className="flex items-center gap-1 bg-white border border-amber-300 rounded-md px-2 py-0.5 text-[11px]">
-              <Magnet className="w-3 h-3 text-amber-700" />
-              <span className="text-slate-500 font-medium">{isJa ? 'スナップ:' : 'Snap:'}</span>
-              <select
-                value={gridSnapMm}
-                onChange={(e) => setGridSnapMm(Number(e.target.value))}
-                className="bg-transparent font-bold text-slate-800 outline-none cursor-pointer"
+            {/* Grid Snap & Free-form Placement Toggle & Increment Selector */}
+            <div className="h-7 flex items-center bg-white border border-slate-200 rounded-lg p-0.5 text-[11px] shadow-2xs">
+              <button
+                type="button"
+                id="toggle-snap-btn"
+                onClick={toggleGridSnap}
+                title={isJa 
+                  ? (gridSnapMm > 0 ? 'クリックで自由配置に切り替え (S)' : 'クリックでスナップ配置に切り替え (S)') 
+                  : (gridSnapMm > 0 ? 'Click to switch to Free-form (S)' : 'Click to enable Snap-to-Grid (S)')}
+                className={`h-full px-2 rounded-md flex items-center gap-1 font-semibold transition-colors cursor-pointer ${
+                  gridSnapMm > 0
+                    ? 'bg-sky-100 text-sky-800 border border-sky-300'
+                    : 'bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200'
+                }`}
               >
-                <option value={10}>10mm</option>
-                <option value={50}>50mm</option>
-                <option value={100}>100mm</option>
-                <option value={0}>{isJa ? 'なし (自由)' : 'Free'}</option>
+                <Magnet className={`w-3 h-3 ${gridSnapMm > 0 ? 'text-sky-600' : 'text-slate-400'}`} />
+                <span>{gridSnapMm > 0 ? (isJa ? 'スナップ ON' : 'Snap ON') : (isJa ? '自由配置' : 'Free-form')}</span>
+                <span className="text-[9px] opacity-75 font-mono ml-0.5">[S]</span>
+              </button>
+
+              <div className="w-px h-3.5 bg-slate-200 mx-1" />
+
+              <select
+                id="select-snap-step"
+                value={gridSnapMm}
+                onChange={(e) => handleSelectGridSnap(Number(e.target.value))}
+                title={isJa ? 'スナップ刻み幅を選択' : 'Select snap grid step'}
+                className="bg-transparent font-medium text-slate-800 outline-none cursor-pointer pr-1 text-[11px]"
+              >
+                <option value={10}>0.01m (1cm)</option>
+                <option value={50}>0.05m (5cm)</option>
+                <option value={100}>0.10m (10cm)</option>
+                <option value={200}>0.20m (20cm)</option>
+                <option value={500}>0.50m (50cm)</option>
+                <option value={0}>{isJa ? 'なし (自由配置)' : 'None (Free-form)'}</option>
+              </select>
+            </div>
+
+            {/* Magnetic Edge Snap (Attraction toward adjacent cargo edges & walls) */}
+            <div className="h-7 flex items-center bg-white border border-slate-200 rounded-lg p-0.5 text-[11px] shadow-2xs">
+              <button
+                type="button"
+                id="toggle-magnetic-snap-btn"
+                onClick={toggleMagneticSnap}
+                title={isJa 
+                  ? (magneticSnapMm > 0 ? 'クリックでマグネット吸着を解除 (B)' : 'クリックでマグネット吸着を有効化 (B)') 
+                  : (magneticSnapMm > 0 ? 'Click to disable Magnetic Snap (B)' : 'Click to enable Magnetic Snap (B)')}
+                className={`h-full px-2 rounded-md flex items-center gap-1 font-semibold transition-colors cursor-pointer ${
+                  magneticSnapMm > 0
+                    ? 'bg-cyan-100 text-cyan-800 border border-cyan-300'
+                    : 'bg-slate-100 text-slate-600 hover:text-slate-900 border border-slate-200'
+                }`}
+              >
+                <Magnet className={`w-3 h-3 ${magneticSnapMm > 0 ? 'text-cyan-600' : 'text-slate-400'}`} />
+                <span>{magneticSnapMm > 0 ? (isJa ? '吸着 ON' : 'Magnetic ON') : (isJa ? '吸着 OFF' : 'Mag OFF')}</span>
+                <span className="text-[9px] opacity-75 font-mono ml-0.5">[B]</span>
+              </button>
+
+              <div className="w-px h-3.5 bg-slate-200 mx-1" />
+
+              <select
+                id="select-magnetic-snap-distance"
+                value={magneticSnapMm}
+                onChange={(e) => handleSelectMagneticSnap(Number(e.target.value))}
+                title={isJa ? 'マグネット吸着距離（閾値）を選択' : 'Select magnetic snap threshold distance'}
+                className="bg-transparent font-medium text-slate-800 outline-none cursor-pointer pr-1 text-[11px]"
+              >
+                <option value={30}>30mm (3cm)</option>
+                <option value={50}>50mm (5cm)</option>
+                <option value={75}>75mm (7.5cm)</option>
+                <option value={100}>100mm (10cm)</option>
+                <option value={150}>150mm (15cm)</option>
+                <option value={0}>{isJa ? 'なし (OFF)' : 'None (OFF)'}</option>
               </select>
             </div>
 
@@ -2320,19 +3047,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 type="button"
                 onClick={handleUnloadContainerAll}
                 title={isJa 
-                  ? 'コンテナ内の貨物をすべて未積載トレイに戻し、手動で一から配置します (Ctrl+Zで元に戻せます)' 
-                  : 'Unload all cargo items back to tray for manual loading (Ctrl+Z to undo)'}
-                className={`px-2 py-1 rounded-md border text-[11px] font-bold shadow-2xs transition-all flex items-center gap-1 cursor-pointer ${
+                  ? 'コンテナ内の貨物をすべて未積載トレイに戻します (Ctrl+Zで復元可能)' 
+                  : 'Unload all cargo back to tray (Ctrl+Z to undo)'}
+                className={`h-7 px-2 rounded-lg border text-[11px] font-medium shadow-2xs transition-all flex items-center gap-1 cursor-pointer ${
                   confirmingUnload 
                     ? 'bg-red-600 text-white border-red-700 animate-pulse' 
-                    : 'bg-white border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300'
+                    : 'bg-white border-red-200 text-red-700 hover:bg-red-50'
                 }`}
               >
                 <PackageMinus className="w-3.5 h-3.5 text-current" />
                 <span>
                   {confirmingUnload 
-                    ? (isJa ? '本当に空にしますか？ (クリックで確定)' : 'Confirm Unload All?') 
-                    : (isJa ? '一括アンロード (空にする)' : 'Unload All')}
+                    ? (isJa ? '確定？' : 'Confirm?') 
+                    : (isJa ? '一括アンロード' : 'Unload All')}
                 </span>
               </button>
             )}
@@ -2342,11 +3069,11 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               id="banner-shortcuts-help-btn"
               type="button"
               onClick={() => setShowShortcutsHelp(true)}
-              title={isJa ? 'キーボードショートカット一覧ヘルプ (?)' : 'Keyboard Shortcuts Help (?)'}
-              className="px-2 py-1 rounded-md bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors"
+              title={isJa ? '操作・ショートカット一覧 (?)' : 'Keyboard Shortcuts (?)'}
+              className="h-7 px-2 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 flex items-center gap-1 text-[11px] font-medium shadow-2xs transition-colors cursor-pointer"
             >
-              <Keyboard className="w-3 h-3 text-amber-700" />
-              <span>{isJa ? '操作ヘルプ (?)' : 'Help (?)'}</span>
+              <HelpCircle className="w-3 h-3 text-slate-500" />
+              <span>{isJa ? 'ヘルプ (?)' : 'Help (?)'}</span>
             </button>
 
             {/* Done */}
@@ -2360,9 +3087,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 isDraggingExistingItemRef.current = null;
                 setGhostCoords(null);
               }}
-              className="px-2.5 py-1 rounded-md bg-slate-900 hover:bg-black text-white flex items-center gap-1 text-[11px] font-bold shadow-2xs transition-colors"
+              className="h-7 px-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white flex items-center gap-1 text-[11px] font-medium shadow-2xs transition-colors cursor-pointer"
             >
-              <Check className="w-3 h-3 text-emerald-400" />
+              <Check className="w-3 h-3 text-white" />
               <span>{isJa ? '完了' : 'Done'}</span>
             </button>
           </div>
@@ -2377,17 +3104,40 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
             </span>
-            <span className="truncate max-w-[200px] sm:max-w-xs text-amber-200">
+            <span className="truncate max-w-[160px] sm:max-w-xs text-amber-200">
               {isDraggingExistingItem ? (
-                isJa ? `再配置中: 「${isDraggingExistingItem.name}」` : `Repositioning: "${isDraggingExistingItem.name}"`
+                isJa ? `再配置: 「${isDraggingExistingItem.name}」` : `Repositioning: "${isDraggingExistingItem.name}"`
               ) : (
-                isJa ? `配置中: 「${heldUnplacedItem?.unplaced.name}」` : `Placing: "${heldUnplacedItem?.unplaced.name}"`
+                isJa ? `配置: 「${heldUnplacedItem?.unplaced.name}」` : `Placing: "${heldUnplacedItem?.unplaced.name}"`
               )}
             </span>
-            <span className="text-slate-300 text-[11px] font-normal hidden md:inline">
-              {isJa ? '（3D画面内クリックで配置確定）' : '(Click in 3D to place)'}
-            </span>
+            {ghostCoords && (
+              <span className="font-mono text-[11px] text-sky-200 bg-sky-950/60 px-2 py-0.5 rounded-md border border-sky-400/40 hidden sm:inline-block">
+                X:{formatMeters(ghostCoords.x)}m Y:{formatMeters(ghostCoords.y)}m Z:{formatMeters(ghostCoords.z)}m
+              </span>
+            )}
           </div>
+
+          {/* Snap Mode toggle pill in placement banner */}
+          <button
+            type="button"
+            id="banner-toggle-snap-btn"
+            onClick={toggleGridSnap}
+            title={isJa ? 'グリッドスナップ切替 (Sキー / Alt押下で一時切替)' : 'Toggle Snap-to-Grid (S key / Hold Alt for temporary toggle)'}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all cursor-pointer ${
+              gridSnapMm > 0
+                ? 'bg-sky-600/90 hover:bg-sky-500 text-white border-sky-300 shadow-xs'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-600'
+            }`}
+          >
+            <Magnet className="w-3 h-3 text-current" />
+            <span>
+              {gridSnapMm > 0 
+                ? (isJa ? `スナップ: ${formatMeters(gridSnapMm)}m` : `Snap: ${formatMeters(gridSnapMm)}m`) 
+                : (isJa ? '自由配置' : 'Free-form')}
+            </span>
+            <kbd className="px-1 py-0.2 rounded bg-black/40 text-[9px] font-mono border border-white/20">S</kbd>
+          </button>
 
           <button
             id="floating-cancel-placement-btn"
@@ -2407,16 +3157,33 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         </div>
       )}
 
-      {/* Floating Selected Box Inspector Card (Displayed on Mouse Click) */}
+      {/* Floating Selected Box Inspector Card (Displayed on Mouse Click, Draggable) */}
       {activeSelectedItem && (
-        <div className={`absolute ${isManualMode ? 'top-26' : 'top-16'} left-3 pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs max-w-xs z-20 animate-fade-in text-slate-800`}>
-          <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2 mb-2">
-            <div className="flex items-center gap-1.5 truncate">
+        <div 
+          ref={inspectorCardRef}
+          style={
+            inspectorPos
+              ? { top: `${inspectorPos.y}px`, left: `${inspectorPos.x}px`, right: 'auto' }
+              : undefined
+          }
+          className={`absolute pointer-events-auto bg-white/95 backdrop-blur-md p-3.5 rounded-xl border border-slate-200 shadow-xl text-xs max-w-xs z-20 animate-fade-in text-slate-800 transition-shadow ${
+            !inspectorPos ? (isManualMode ? 'top-28 left-3' : 'top-16 left-3') : ''
+          } ${isDraggingInspector ? 'shadow-2xl ring-2 ring-blue-500/40 select-none opacity-95' : ''}`}
+        >
+          {/* Header with Title, Drag Handle, Badges, Reset Position & Close Button */}
+          <div 
+            onMouseDown={handleInspectorDragStart}
+            onTouchStart={handleInspectorDragStart}
+            className="flex items-center justify-between gap-1.5 border-b border-slate-100 pb-2 mb-2 cursor-grab active:cursor-grabbing select-none group"
+            title={isJa ? 'ドラッグして画面内の好きな位置へ移動できます' : 'Drag to reposition anywhere'}
+          >
+            <div className="flex items-center gap-1.5 truncate min-w-0">
+              <GripVertical className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-colors shrink-0 cursor-grab" />
               <span 
                 className="w-3 h-3 rounded-full shrink-0 border border-black/10" 
                 style={{ backgroundColor: activeSelectedItem.color }} 
               />
-              <span className="font-bold text-slate-900 truncate">
+              <span className="font-bold text-slate-900 truncate" title={activeSelectedItem.name}>
                 {activeSelectedItem.name}
               </span>
             </div>
@@ -2428,13 +3195,27 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 </span>
               )}
               {activeSelectedItem.containerIndex && (
-                <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-300">
+                <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-200">
                   C#{activeSelectedItem.containerIndex}
                 </span>
               )}
-              <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-300">
+              <span className="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] border border-slate-200">
                 #{activeSelectedItem.sequenceNumber}
               </span>
+              {inspectorPos && (
+                <button
+                  type="button"
+                  id="reset-inspector-pos-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInspectorPos(null);
+                  }}
+                  title={isJa ? 'カードの位置を初期位置に戻す' : 'Reset position'}
+                  className="text-[9px] text-slate-500 hover:text-slate-800 font-semibold px-1 py-0.5 rounded hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  {isJa ? '位置初期化' : 'Reset Pos'}
+                </button>
+              )}
               <button
                 type="button"
                 id="close-cargo-inspector-card-btn"
@@ -2484,176 +3265,140 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
                 {/* Manual Adjustment fine-tuning controls when item is selected in manual mode */}
                 {isManualMode && activeSelectedItem && activeSelectedItem.id === target.id && (
-                  <div className="mt-2 pt-2 border-t border-slate-200 space-y-1.5 bg-amber-50/60 -mx-3.5 -mb-3.5 p-3 rounded-b-xl">
+                  <div className="mt-2 pt-2 border-t border-slate-200 space-y-2 bg-slate-50/80 -mx-3.5 -mb-3.5 p-3 rounded-b-xl border-t border-slate-100">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-bold text-slate-800 flex items-center gap-1">
-                        <Move className="w-3 h-3 text-amber-600" />
+                      <span className="font-semibold text-slate-800 flex items-center gap-1">
+                        <Move className="w-3 h-3 text-slate-500" />
                         {isJa ? '位置微調整' : 'Nudge Position'}
                       </span>
                       <div className="flex items-center gap-1.5">
                         {activeSpeedMultiplier > 1 && (
-                          <span className="text-[10px] font-bold text-amber-800 bg-amber-200/90 px-1.5 py-0.5 rounded animate-pulse flex items-center gap-0.5">
-                            ⚡ {activeSpeedMultiplier}x {isJa ? '高速' : 'Fast'}
+                          <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.2 rounded flex items-center gap-0.5">
+                            ⚡ {activeSpeedMultiplier}x
                           </span>
                         )}
                         <span className="text-[10px] text-slate-500 font-mono">
-                          ±{Math.round((gridSnapMm || 50) * activeSpeedMultiplier)}mm
+                          ±{formatMeters((gridSnapMm > 0 ? gridSnapMm : 10) * activeSpeedMultiplier)}m
                         </span>
                       </div>
                     </div>
 
                     {/* Coordinate Nudge Controls */}
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-3 gap-1.5">
                       {/* X Nudge */}
-                      <div className="bg-white rounded border border-slate-200 p-1 flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-slate-500">X:</span>
-                        <div className="flex items-center gap-0.5">
+                      <div className="bg-white rounded-lg border border-slate-200 px-1.5 py-1 flex items-center justify-between shadow-2xs">
+                        <span className="text-[11px] font-bold text-slate-500">X</span>
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
                             title={isJa ? 'X奥へ微調整' : 'Nudge -X'}
                             onClick={() => {
-                              const step = gridSnapMm || 50;
+                              const step = gridSnapMm > 0 ? gridSnapMm : 10;
                               handleNudgeItem(target, { dx: -step });
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer transition-colors"
                           >-</button>
                           <button
                             type="button"
                             title={isJa ? 'X手前へ微調整' : 'Nudge +X'}
                             onClick={() => {
-                              const step = gridSnapMm || 50;
+                              const step = gridSnapMm > 0 ? gridSnapMm : 10;
                               handleNudgeItem(target, { dx: step });
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer transition-colors"
                           >+</button>
                         </div>
                       </div>
 
                       {/* Y Nudge */}
-                      <div className="bg-white rounded border border-slate-200 p-1 flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-slate-500">Y:</span>
-                        <div className="flex items-center gap-0.5">
+                      <div className="bg-white rounded-lg border border-slate-200 px-1.5 py-1 flex items-center justify-between shadow-2xs">
+                        <span className="text-[11px] font-bold text-slate-500">Y</span>
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
                             title={isJa ? 'Y微調整 (-)' : 'Nudge -Y'}
                             onClick={() => {
-                              const step = gridSnapMm || 50;
+                              const step = gridSnapMm > 0 ? gridSnapMm : 10;
                               handleNudgeItem(target, { dy: -step });
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer transition-colors"
                           >-</button>
                           <button
                             type="button"
                             title={isJa ? 'Y微調整 (+)' : 'Nudge +Y'}
                             onClick={() => {
-                              const step = gridSnapMm || 50;
+                              const step = gridSnapMm > 0 ? gridSnapMm : 10;
                               handleNudgeItem(target, { dy: step });
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer transition-colors"
                           >+</button>
                         </div>
                       </div>
 
                       {/* Z Nudge */}
-                      <div className="bg-white rounded border border-slate-200 p-1 flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-slate-500">Z:</span>
-                        <div className="flex items-center gap-0.5">
+                      <div className="bg-white rounded-lg border border-slate-200 px-1.5 py-1 flex items-center justify-between shadow-2xs">
+                        <span className="text-[11px] font-bold text-slate-500">Z</span>
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
                             title={isJa ? 'Z下降' : 'Nudge -Z (Down)'}
                             onClick={() => {
-                              const step = gridSnapMm || 50;
+                              const step = gridSnapMm > 0 ? gridSnapMm : 10;
                               handleNudgeItem(target, { dz: -step });
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer transition-colors"
                           >-</button>
                           <button
                             type="button"
                             title={isJa ? 'Z上昇' : 'Nudge +Z (Up)'}
                             onClick={() => {
-                              const step = gridSnapMm || 50;
+                              const step = gridSnapMm > 0 ? gridSnapMm : 10;
                               handleNudgeItem(target, { dz: step });
                             }}
-                            className="w-4 h-4 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer"
+                            className="w-5 h-5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 rounded flex items-center justify-center font-bold text-slate-700 text-xs cursor-pointer transition-colors"
                           >+</button>
                         </div>
                       </div>
                     </div>
 
-                    {/* Quick Gravity Drop button */}
-                    <button
-                      type="button"
-                      id="inspector-drop-btn"
-                      onClick={() => handleDropItemToSupport(target)}
-                      className="w-full py-1.5 px-2 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-                      title={isJa ? '真下の床または荷物天面まで着地 (Space / D)' : 'Drop to floor or underlying cargo (Space / D)'}
-                    >
-                      <ArrowDownToLine className="w-3.5 h-3.5" />
-                      <span>{isJa ? '直下へ着地 (Space)' : 'Drop to Floor/Support (Space)'}</span>
-                    </button>
-
-                    {/* Keyboard Shortcuts Cheatsheet */}
-                    <div className="bg-amber-100/70 border border-amber-200/80 rounded px-2 py-1 text-[10px] text-amber-900 flex flex-col gap-0.5">
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">{isJa ? '↑ ↓ ← →' : 'Arrows'}:</span>
-                        <span>{isJa ? '微動 (長押しで高速化⚡)' : 'Nudge (Hold for fast⚡)'}</span>
-                      </div>
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">{isJa ? 'Shift+矢印' : 'Shift+Arrows'}:</span>
-                        <span>{isJa ? '最高速ブースト移動' : 'Turbo Boost Nudge'}</span>
-                      </div>
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">{isJa ? 'PgUp / PgDn' : 'PgUp / PgDn'}:</span>
-                        <span>{isJa ? '垂直昇降 (Z軸)' : 'Elevation Z'}</span>
-                      </div>
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">{isJa ? 'Space / D' : 'Space / D'}:</span>
-                        <span>{isJa ? '直下へ着地' : 'Gravity Drop'}</span>
-                      </div>
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">M:</span>
-                        <span>{isJa ? '手動モード切替' : 'Toggle Manual Mode'}</span>
-                      </div>
-                      <div className="flex items-center justify-between font-mono">
-                        <span className="font-semibold text-slate-700">G:</span>
-                        <span>{isJa ? '再配置モード (移動)' : 'Reposition Mode'}</span>
-                      </div>
-                      <div className="pt-0.5 border-t border-amber-200/80 flex items-center justify-between">
-                        <span className="text-[9px] text-amber-800">{isJa ? '全一覧:' : 'All:'}</span>
-                        <button
-                          type="button"
-                          onClick={() => setShowShortcutsHelp(true)}
-                          className="text-[9px] text-amber-900 font-bold underline hover:text-amber-950 flex items-center gap-0.5 cursor-pointer"
-                        >
-                          <HelpCircle className="w-2.5 h-2.5" />
-                          <span>{isJa ? 'ショートカット一覧 (?)' : 'Shortcuts (?)'}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Action buttons: Move (reposition), Rotate & Remove */}
-                    <div className="flex items-center gap-1 pt-1">
+                    {/* Unified Action Button Grid */}
+                    <div className="grid grid-cols-2 gap-1.5 pt-0.5">
+                      {/* 1. Snap to Back-Left (Q) */}
                       <button
                         type="button"
-                        onClick={() => {
-                          setIsDraggingExistingItem(target);
-                          isDraggingExistingItemRef.current = target;
-                          setInternalSelectedItem(null);
-                          activeSelectedItemRef.current = null;
-                          if (onSelectItem) onSelectItem(null);
-                          showToast(isJa
-                            ? `「${target.name}」の再配置モードを開始しました。移動先を3D画面内でクリックしてください (Esc / C でキャンセル)`
-                            : `Moving "${target.name}". Click target position in 3D scene (Esc / C to cancel)`);
+                        id="inspector-snap-backleft-btn"
+                        onClick={(e) => {
+                          e.currentTarget.blur();
+                          handleMoveToDeepestBackLeft(target);
                         }}
-                        className="flex-1 py-1 px-1 rounded bg-white hover:bg-amber-100 border border-amber-300 text-slate-800 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
-                        title={isJa ? '3D画面内でクリックして位置変更 (ショートカット: G / Escでキャンセル)' : 'Click in 3D to reposition (Shortcut: G / Esc to cancel)'}
+                        className="h-8 px-2 rounded-lg bg-amber-50 hover:bg-amber-100 active:bg-amber-200 text-amber-800 border border-amber-300 text-xs font-semibold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                        title={isJa ? '一番奥左の置ける場所まで一気に移動 (Qキー)' : 'Snap to deepest back-left position (Q key)'}
                       >
-                        <Move className="w-3 h-3 text-amber-700" />
-                        <span>{isJa ? '再配置 (G)' : 'Move (G)'}</span>
+                        <ArrowDownToLine className="w-3.5 h-3.5 text-amber-700 rotate-45" />
+                        <span>{isJa ? '奥左へ (Q)' : 'Back-Left (Q)'}</span>
                       </button>
+
+                      {/* 2. Landing Drop (Space) */}
                       <button
                         type="button"
-                        onClick={() => {
+                        id="inspector-drop-btn"
+                        onClick={(e) => {
+                          e.currentTarget.blur();
+                          handleDropItemToSupport(target);
+                        }}
+                        className="h-8 px-2 rounded-lg bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 text-xs font-medium flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                        title={isJa ? '真下の床または荷物天面まで着地 (Space / D)' : 'Drop to floor or underlying cargo (Space / D)'}
+                      >
+                        <ArrowDownToLine className="w-3.5 h-3.5 text-blue-600" />
+                        <span>{isJa ? '着地 (Space)' : 'Drop (Space)'}</span>
+                      </button>
+
+                      {/* 3. Rotate 90° (R) */}
+                      <button
+                        type="button"
+                        id="inspector-rotate-btn"
+                        onClick={(e) => {
+                          e.currentTarget.blur();
                           if (onManualMoveItem) {
                             onManualMoveItem(target.id, {
                               x: target.x,
@@ -2667,14 +3412,43 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                             showToast(isJa ? `90°回転しました` : `Rotated 90°`);
                           }
                         }}
-                        className="flex-1 py-1 px-1 rounded bg-white hover:bg-amber-100 border border-amber-300 text-slate-800 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
+                        className="h-8 px-2 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-medium flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                        title={isJa ? '荷物を90°回転 (R)' : 'Rotate 90° (R)'}
                       >
-                        <RotateCw className="w-3 h-3 text-amber-700" />
-                        <span>{isJa ? '回転' : 'Rotate'}</span>
+                        <RotateCw className="w-3.5 h-3.5 text-slate-500" />
+                        <span>{isJa ? '回転 (R)' : 'Rotate (R)'}</span>
                       </button>
+
+                      {/* 4. Reposition (G) */}
                       <button
                         type="button"
-                        onClick={() => {
+                        id="inspector-reposition-btn"
+                        onClick={(e) => {
+                          e.currentTarget.blur();
+                          setIsDraggingExistingItem(target);
+                          isDraggingExistingItemRef.current = target;
+                          setInternalSelectedItem(null);
+                          activeSelectedItemRef.current = null;
+                          if (onSelectItem) onSelectItem(null);
+                          showToast(isJa
+                            ? `「${target.name}」の再配置モードを開始しました。移動先を3D画面内でクリックしてください (Esc / C でキャンセル)`
+                            : `Moving "${target.name}". Click target position in 3D scene (Esc / C to cancel)`);
+                        }}
+                        className="h-8 px-2 rounded-lg bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 hover:text-slate-900 border border-slate-200 text-xs font-medium flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                        title={isJa ? '3D画面内でクリックして位置変更 (G / Escでキャンセル)' : 'Click in 3D to reposition (G / Esc to cancel)'}
+                      >
+                        <Move className="w-3.5 h-3.5 text-slate-500" />
+                        <span>{isJa ? '再配置 (G)' : 'Move (G)'}</span>
+                      </button>
+                    </div>
+
+                    {/* Unload to tray full-width button */}
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        id="inspector-remove-btn"
+                        onClick={(e) => {
+                          e.currentTarget.blur();
                           if (onManualRemoveItem) {
                             onManualRemoveItem(target.id);
                             setInternalSelectedItem(null);
@@ -2682,10 +3456,26 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                             showToast(isJa ? `未積載に戻しました` : `Returned to unplaced`);
                           }
                         }}
-                        className="flex-1 py-1 px-1 rounded bg-white hover:bg-red-50 border border-red-200 text-red-700 text-[10px] font-bold flex items-center justify-center gap-0.5 transition-colors"
+                        className="w-full h-7 px-2 rounded-lg bg-white hover:bg-red-50 active:bg-red-100 text-red-700 hover:text-red-800 border border-red-200 text-[11px] font-medium flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                        title={isJa ? '未積載トレイに戻す' : 'Return to unplaced tray'}
                       >
                         <Trash2 className="w-3 h-3 text-red-600" />
-                        <span>{isJa ? '未積載へ' : 'Remove'}</span>
+                        <span>{isJa ? '未積載トレイに戻す (Del / Backspace)' : 'Return to Unplaced (Del)'}</span>
+                      </button>
+                    </div>
+
+                    {/* Subtle 1-line shortcut hint with drag guidance */}
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200/60">
+                      <span title={isJa ? '上部ヘッダーをつかんで好きな位置へドラッグできます' : 'Drag header to reposition card'}>
+                        {isJa ? '[矢印] 微動 / [Shift] 昇降' : '[Arrows] Nudge / [Shift] Elevate'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowShortcutsHelp(true)}
+                        className="text-slate-500 hover:text-slate-800 underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <HelpCircle className="w-2.5 h-2.5" />
+                        <span>{isJa ? 'ヘルプ (?)' : 'Shortcuts (?)'}</span>
                       </button>
                     </div>
                   </div>
@@ -3091,6 +3881,47 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                 <span>{isJa ? '全貨物の色を鮮やかに変更' : 'Apply Vivid Colors to Cargo'}</span>
               </button>
             )}
+
+            {/* 6. Grid Snap & Placement Mode Settings */}
+            <div className="pt-2 border-t border-slate-100 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 mb-0.5">
+                <span className="flex items-center gap-1 font-medium">
+                  <Magnet className="w-2.5 h-2.5 text-slate-600" />
+                  {isJa ? '配置スナップ (Snap-to-Grid)' : 'Snap-to-Grid'}
+                </span>
+                <span className="font-mono text-slate-700 font-semibold text-[10px]">
+                  {gridSnapMm > 0 ? `${formatMeters(gridSnapMm)}m` : (isJa ? '自由配置' : 'Free')}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px]">
+                <button
+                  type="button"
+                  id="panel-snap-toggle-btn"
+                  onClick={toggleGridSnap}
+                  className={`py-1 px-1.5 rounded font-semibold text-center border transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+                    gridSnapMm > 0
+                      ? 'bg-sky-50 text-sky-800 border-sky-300'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Magnet className="w-3 h-3 text-current" />
+                  <span>{gridSnapMm > 0 ? (isJa ? 'スナップ ON' : 'Snap ON') : (isJa ? '自由配置' : 'Free-form')}</span>
+                </button>
+                <select
+                  id="panel-select-snap-step"
+                  value={gridSnapMm}
+                  onChange={(e) => handleSelectGridSnap(Number(e.target.value))}
+                  className="py-1 px-1.5 rounded bg-slate-50 border border-slate-200 text-slate-800 font-medium text-[10px] outline-none cursor-pointer"
+                >
+                  <option value={10}>0.01m (1cm)</option>
+                  <option value={50}>0.05m (5cm)</option>
+                  <option value={100}>0.10m (10cm)</option>
+                  <option value={200}>0.20m (20cm)</option>
+                  <option value={500}>0.50m (50cm)</option>
+                  <option value={0}>{isJa ? 'なし (自由配置)' : 'None (Free)'}</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -3233,28 +4064,6 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                   <span>{isJa ? '配置キャンセル (Esc/C)' : 'Cancel (Esc/C)'}</span>
                 </button>
               )}
-              {onManualUnloadContainer && (
-                <button
-                  type="button"
-                  id="tray-unload-container-btn"
-                  onClick={handleUnloadContainerAll}
-                  title={isJa 
-                    ? 'コンテナ内の貨物をすべてアンロードして手動で載せる (Ctrl+Zで復元可能)' 
-                    : 'Unload all container cargo to tray for manual loading (Ctrl+Z to undo)'}
-                  className={`px-2 py-1 rounded text-[11px] font-bold border transition-all flex items-center gap-1 cursor-pointer ${
-                    confirmingUnload
-                      ? 'bg-red-600 text-white border-red-700 animate-pulse'
-                      : 'bg-white hover:bg-red-50 text-red-700 border-red-200'
-                  }`}
-                >
-                  <PackageMinus className="w-3.5 h-3.5 text-current" />
-                  <span>
-                    {confirmingUnload
-                      ? (isJa ? '本当に空にする？(確定)' : 'Confirm Unload?')
-                      : (isJa ? '一括アンロード' : 'Unload All')}
-                  </span>
-                </button>
-              )}
               <button
                 type="button"
                 id="toggle-tray-collapse-btn"
@@ -3277,29 +4086,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                       <Check className="w-4 h-4 text-emerald-500 shrink-0" />
                       <span>
                         {isJa 
-                          ? 'すべての貨物がコンテナ内に配置済みです。手動でゼロから載せ直す場合は一括アンロードを実行できます。' 
-                          : 'All items are currently loaded. To manually pack from scratch, unload all items to tray.'}
+                          ? 'すべての貨物がコンテナ内に配置済みです。手動で載せ替えるには上のツールバーの「一括アンロード」ボタンをご利用ください。' 
+                          : 'All items are currently loaded. To manually pack from scratch, use "Unload All" in the top toolbar.'}
                       </span>
                     </div>
-                    {onManualUnloadContainer && (
-                      <button
-                        type="button"
-                        id="tray-empty-state-unload-btn"
-                        onClick={handleUnloadContainerAll}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer ${
-                          confirmingUnload
-                            ? 'bg-red-600 text-white animate-pulse'
-                            : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-300'
-                        }`}
-                      >
-                        <PackageMinus className="w-3.5 h-3.5 text-current" />
-                        <span>
-                          {confirmingUnload
-                            ? (isJa ? '本当に空にしますか？ (クリックで確定)' : 'Confirm Unload All Cargo?')
-                            : (isJa ? 'コンテナを空にして手動で載せる (一括アンロード)' : 'Unload Container & Pack Manually')}
-                        </span>
-                      </button>
-                    )}
                   </div>
                 </div>
               ) : sortedUnplacedItems.length === 0 ? (
@@ -3401,7 +4191,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between gap-1 mt-0.5">
-                              <span className="truncate">{item.dimensions.length}×{item.dimensions.width}×{item.dimensions.height}</span>
+                              <span className="truncate">{formatDimensions(item.dimensions.length, item.dimensions.width, item.dimensions.height, unitSystem, true)}</span>
                               <span className={`px-1.5 py-0.2 rounded font-bold shrink-0 ${
                                 traySortOrder.startsWith('weight') 
                                   ? 'bg-amber-100 text-amber-950 border border-amber-300' 
@@ -3503,7 +4293,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
                             </span>
                           </div>
                           <div className="text-[10px] text-slate-500 font-mono flex items-center justify-between gap-1 mt-0.5">
-                            <span className="truncate">{item.dimensions.length}×{item.dimensions.width}×{item.dimensions.height}</span>
+                            <span className="truncate">{formatDimensions(item.dimensions.length, item.dimensions.width, item.dimensions.height, unitSystem, true)}</span>
                             <span className={`px-1.5 py-0.2 rounded font-bold shrink-0 ${
                               traySortOrder.startsWith('weight') 
                                 ? 'bg-amber-100 text-amber-950 border border-amber-300' 
@@ -3540,7 +4330,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           <span className="text-sm">⚡</span>
           <span>{isJa ? `長押し高速移動: ${activeSpeedMultiplier}x 速` : `Key Hold Speed: ${activeSpeedMultiplier}x`}</span>
           <span className="text-[10px] bg-black/25 px-1.5 py-0.5 rounded-full font-mono text-amber-100">
-            ±{Math.round((gridSnapMm || 50) * activeSpeedMultiplier)}mm
+            ±{formatMeters((gridSnapMm || 50) * activeSpeedMultiplier)}m
           </span>
         </div>
       )}
