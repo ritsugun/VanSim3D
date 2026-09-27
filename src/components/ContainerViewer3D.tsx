@@ -10,7 +10,7 @@ import {
   Hand, Move, RotateCw, Trash2, Magnet, Check, AlertCircle, ArrowDownToLine, 
   RefreshCw, Undo2, Redo2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Scale, LayoutGrid, List, Search, Plus, PackagePlus, PackageMinus,
-  HelpCircle, Keyboard
+  HelpCircle, Keyboard, Target
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact, formatMeters } from '../utils/units';
 import { VIVID_NEON_PALETTE, boostHexToVivid } from '../utils/colors';
@@ -94,6 +94,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
   const ghostGroupRef = useRef<THREE.Group | null>(null);
   const snapGridGroupRef = useRef<THREE.Group | null>(null);
   const magneticGuideGroupRef = useRef<THREE.Group | null>(null);
+  const dragGuideLinesGroupRef = useRef<THREE.Group | null>(null);
+  const snapIndicatorGroupRef = useRef<THREE.Group | null>(null);
   const lastNonZeroGridSnapMm = useRef<number>(50);
   const lastNonZeroMagSnapMm = useRef<number>(75);
   const draggedUnplacedRef = useRef<{ unplaced: UnplacedItem; rotation: 0 | 1; color: string } | null>(null);
@@ -149,6 +151,12 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     offsetZ?: number;
     containerIndex?: number;
     magneticSnap?: MagneticSnapCandidate;
+    rawDragX?: number;
+    rawDragY?: number;
+    rawDragZ?: number;
+    isSnappedToGrid?: boolean;
+    snapDistanceMm?: number;
+    nearestValidGridPos?: { x: number; y: number; z: number };
   } | null>(null);
 
   const [confirmingUnload, setConfirmingUnload] = useState<boolean>(false);
@@ -1110,6 +1118,9 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         cogGroupRef.current = null;
         ghostGroupRef.current = null;
         snapGridGroupRef.current = null;
+        magneticGuideGroupRef.current = null;
+        dragGuideLinesGroupRef.current = null;
+        snapIndicatorGroupRef.current = null;
       };
     } catch (err: any) {
       console.error('Three.js / WebGL initialization error:', err);
@@ -1491,7 +1502,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     scene.add(allCogGroup);
   }, [centerOfGravity, showCoG, activeItemsToDisplay.length, currentTab, containers, container, sceneReady]);
 
-  // Update Ghost Box in 3D Scene & Magnetic snap lines
+  // Update Ghost Box & Dynamic Snap-Indicator Wireframe Bounding Box in 3D Scene
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -1500,8 +1511,14 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       if (ghostGroupRef.current) {
         ghostGroupRef.current.visible = false;
       }
+      if (snapIndicatorGroupRef.current) {
+        snapIndicatorGroupRef.current.visible = false;
+      }
       if (magneticGuideGroupRef.current) {
         magneticGuideGroupRef.current.visible = false;
+      }
+      if (dragGuideLinesGroupRef.current) {
+        dragGuideLinesGroupRef.current.visible = false;
       }
       return;
     }
@@ -1512,6 +1529,26 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     const targetOffsetZ = isSideBySide ? targetCont0 * spacingM : 0;
     const activeOffsetZ = ghostCoords.offsetZ !== undefined ? ghostCoords.offsetZ : targetOffsetZ;
 
+    // 1. DYNAMIC SNAP-INDICATOR GROUP (Wireframe bounding box at nearest valid grid position)
+    let snapGroup = snapIndicatorGroupRef.current;
+    if (!snapGroup) {
+      snapGroup = new THREE.Group();
+      snapGroup.name = 'snap-indicator-group';
+      scene.add(snapGroup);
+      snapIndicatorGroupRef.current = snapGroup;
+    }
+
+    while (snapGroup.children.length > 0) {
+      const obj = snapGroup.children[0];
+      snapGroup.remove(obj);
+      if ((obj as any).geometry) (obj as any).geometry.dispose();
+      if ((obj as any).material) {
+        if (Array.isArray((obj as any).material)) (obj as any).material.forEach((m: any) => m.dispose());
+        else (obj as any).material.dispose();
+      }
+    }
+
+    // 2. GHOST DRAGGED ITEM GROUP (Item mesh smoothly following cursor)
     let group = ghostGroupRef.current;
     if (!group) {
       group = new THREE.Group();
@@ -1553,7 +1590,6 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
     if (ghostCoords.magneticSnap?.guideLines && ghostCoords.magneticSnap.guideLines.length > 0) {
       for (const gLine of ghostCoords.magneticSnap.guideLines) {
-        // gLine start/end: [x, z, y] in meters in container local coordinates
         const p1 = new THREE.Vector3(gLine.start[0], gLine.start[1] + 0.006, gLine.start[2] + activeOffsetZ);
         const p2 = new THREE.Vector3(gLine.end[0], gLine.end[1] + 0.006, gLine.end[2] + activeOffsetZ);
         const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
@@ -1581,74 +1617,402 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       magGroup.visible = false;
     }
 
+    // Render Grid-Aligned 3D Guide-Lines across Container Length & Width
+    let guideGroup = dragGuideLinesGroupRef.current;
+    if (!guideGroup) {
+      guideGroup = new THREE.Group();
+      guideGroup.name = 'drag-guidelines-group';
+      scene.add(guideGroup);
+      dragGuideLinesGroupRef.current = guideGroup;
+    }
+
+    while (guideGroup.children.length > 0) {
+      const obj = guideGroup.children[0];
+      guideGroup.remove(obj);
+      if ((obj as any).geometry) (obj as any).geometry.dispose();
+      if ((obj as any).material) {
+        if (Array.isArray((obj as any).material)) (obj as any).material.forEach((m: any) => m.dispose());
+        else (obj as any).material.dispose();
+      }
+    }
+
+    const targetContNum = ghostCoords.containerIndex !== undefined 
+      ? ghostCoords.containerIndex 
+      : (typeof currentTab === 'number' ? currentTab : 1);
+    const targetCont = (containers && containers.length > 0) 
+      ? (containers.find((_, i) => (i + 1) === targetContNum)?.container || container) 
+      : container;
+
+    const contLenM = (targetCont.length || container.length) / 1000;
+    const contWidM = (targetCont.width || container.width) / 1000;
+    const contHeiM = (targetCont.height || container.height) / 1000;
+
+    const itemMinX = ghostCoords.x / 1000;
+    const itemMaxX = (ghostCoords.x + ghostCoords.length) / 1000;
+    const itemCenterX = (itemMinX + itemMaxX) / 2;
+
+    const itemMinY = ghostCoords.y / 1000;
+    const itemMaxY = (ghostCoords.y + ghostCoords.width) / 1000;
+    const itemCenterY = (itemMinY + itemMaxY) / 2;
+
+    const itemElevZ = Math.max(0, ghostCoords.z / 1000);
+    const floorY = 0.0035;
+    const isElevated = itemElevZ > 0.015;
+
+    const hasGridSnap = gridSnapMm > 0;
+    const isDragValid = ghostCoords.isValid;
+
+    const edgeColorHex = !isDragValid 
+      ? 0xf87171 
+      : (isSnapped ? 0x06b6d4 : (hasGridSnap ? 0x0ea5e9 : 0x64748b));
+    const centerColorHex = !isDragValid
+      ? 0xfca5a5
+      : (isSnapped ? 0x38bdf8 : (hasGridSnap ? 0x38bdf8 : 0x94a3b8));
+
+    // 1. Longitudinal Guide Lines (X-axis, full container length from X=0 to contLenM)
+    const xEdgePoints: THREE.Vector3[] = [
+      new THREE.Vector3(0, floorY, itemMinY + activeOffsetZ),
+      new THREE.Vector3(contLenM, floorY, itemMinY + activeOffsetZ),
+      new THREE.Vector3(0, floorY, itemMaxY + activeOffsetZ),
+      new THREE.Vector3(contLenM, floorY, itemMaxY + activeOffsetZ),
+    ];
+
+    const xCenterPoints: THREE.Vector3[] = [
+      new THREE.Vector3(0, floorY, itemCenterY + activeOffsetZ),
+      new THREE.Vector3(contLenM, floorY, itemCenterY + activeOffsetZ),
+    ];
+
+    // 2. Lateral Guide Lines (Z-axis, full container width from Z=activeOffsetZ to contWidM + activeOffsetZ)
+    const zEdgePoints: THREE.Vector3[] = [
+      new THREE.Vector3(itemMinX, floorY, 0 + activeOffsetZ),
+      new THREE.Vector3(itemMinX, floorY, contWidM + activeOffsetZ),
+      new THREE.Vector3(itemMaxX, floorY, 0 + activeOffsetZ),
+      new THREE.Vector3(itemMaxX, floorY, contWidM + activeOffsetZ),
+    ];
+
+    const zCenterPoints: THREE.Vector3[] = [
+      new THREE.Vector3(itemCenterX, floorY, 0 + activeOffsetZ),
+      new THREE.Vector3(itemCenterX, floorY, contWidM + activeOffsetZ),
+    ];
+
+    // 3. Elevated item guidelines & vertical corner drop lines
+    if (isElevated) {
+      const elevY = itemElevZ + 0.003;
+      const spanExtend = 0.4;
+      const minExtX = Math.max(0, itemMinX - spanExtend);
+      const maxExtX = Math.min(contLenM, itemMaxX + spanExtend);
+      const minExtZ = Math.max(0, itemMinY - spanExtend);
+      const maxExtZ = Math.min(contWidM, itemMaxY + spanExtend);
+
+      xEdgePoints.push(
+        new THREE.Vector3(minExtX, elevY, itemMinY + activeOffsetZ),
+        new THREE.Vector3(maxExtX, elevY, itemMinY + activeOffsetZ),
+        new THREE.Vector3(minExtX, elevY, itemMaxY + activeOffsetZ),
+        new THREE.Vector3(maxExtX, elevY, itemMaxY + activeOffsetZ)
+      );
+      zEdgePoints.push(
+        new THREE.Vector3(itemMinX, elevY, minExtZ + activeOffsetZ),
+        new THREE.Vector3(itemMinX, elevY, maxExtZ + activeOffsetZ),
+        new THREE.Vector3(itemMaxX, elevY, minExtZ + activeOffsetZ),
+        new THREE.Vector3(itemMaxX, elevY, maxExtZ + activeOffsetZ)
+      );
+
+      const dropPoints: THREE.Vector3[] = [
+        new THREE.Vector3(itemMinX, floorY, itemMinY + activeOffsetZ),
+        new THREE.Vector3(itemMinX, elevY, itemMinY + activeOffsetZ),
+        new THREE.Vector3(itemMaxX, floorY, itemMinY + activeOffsetZ),
+        new THREE.Vector3(itemMaxX, elevY, itemMinY + activeOffsetZ),
+        new THREE.Vector3(itemMaxX, floorY, itemMaxY + activeOffsetZ),
+        new THREE.Vector3(itemMaxX, elevY, itemMaxY + activeOffsetZ),
+        new THREE.Vector3(itemMinX, floorY, itemMaxY + activeOffsetZ),
+        new THREE.Vector3(itemMinX, elevY, itemMaxY + activeOffsetZ),
+      ];
+
+      const dropGeo = new THREE.BufferGeometry().setFromPoints(dropPoints);
+      const dropMat = new THREE.LineSegments(dropGeo, new THREE.LineBasicMaterial({
+        color: edgeColorHex,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false
+      }));
+      guideGroup.add(dropMat);
+    }
+
+    // 4. Upright wall projection lines on back wall (X=0) and left wall (Z=activeOffsetZ)
+    const wallUprightPoints: THREE.Vector3[] = [
+      new THREE.Vector3(0.002, floorY, itemMinY + activeOffsetZ),
+      new THREE.Vector3(0.002, Math.min(contHeiM, (itemElevZ + ghostCoords.height / 1000) * 1.2), itemMinY + activeOffsetZ),
+      new THREE.Vector3(0.002, floorY, itemMaxY + activeOffsetZ),
+      new THREE.Vector3(0.002, Math.min(contHeiM, (itemElevZ + ghostCoords.height / 1000) * 1.2), itemMaxY + activeOffsetZ),
+      new THREE.Vector3(itemMinX, floorY, activeOffsetZ + 0.002),
+      new THREE.Vector3(itemMinX, Math.min(contHeiM, (itemElevZ + ghostCoords.height / 1000) * 1.2), activeOffsetZ + 0.002),
+      new THREE.Vector3(itemMaxX, floorY, activeOffsetZ + 0.002),
+      new THREE.Vector3(itemMaxX, Math.min(contHeiM, (itemElevZ + ghostCoords.height / 1000) * 1.2), activeOffsetZ + 0.002)
+    ];
+    const wallGeo = new THREE.BufferGeometry().setFromPoints(wallUprightPoints);
+    const wallMat = new THREE.LineSegments(wallGeo, new THREE.LineBasicMaterial({
+      color: edgeColorHex,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false
+    }));
+    guideGroup.add(wallMat);
+
+    // 5. Edge lines mesh
+    const edgeGeo = new THREE.BufferGeometry().setFromPoints([...xEdgePoints, ...zEdgePoints]);
+    const edgeMat = new THREE.LineBasicMaterial({
+      color: edgeColorHex,
+      transparent: true,
+      opacity: hasGridSnap || isSnapped ? 0.6 : 0.35,
+      depthWrite: false
+    });
+    const guideEdgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
+    guideGroup.add(guideEdgeLines);
+
+    // 6. Center lines mesh
+    const centerGeo = new THREE.BufferGeometry().setFromPoints([...xCenterPoints, ...zCenterPoints]);
+    const centerMat = new THREE.LineBasicMaterial({
+      color: centerColorHex,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false
+    });
+    const centerLines = new THREE.LineSegments(centerGeo, centerMat);
+    guideGroup.add(centerLines);
+
+    // 7. Wall intersection tick marks
+    const tickPoints: THREE.Vector3[] = [];
+    const tickLen = 0.035;
+
+    [itemMinY, itemMaxY].forEach(yPos => {
+      tickPoints.push(
+        new THREE.Vector3(0, floorY, yPos + activeOffsetZ - tickLen),
+        new THREE.Vector3(0, floorY, yPos + activeOffsetZ + tickLen),
+        new THREE.Vector3(contLenM, floorY, yPos + activeOffsetZ - tickLen),
+        new THREE.Vector3(contLenM, floorY, yPos + activeOffsetZ + tickLen)
+      );
+    });
+
+    [itemMinX, itemMaxX].forEach(xPos => {
+      tickPoints.push(
+        new THREE.Vector3(xPos - tickLen, floorY, 0 + activeOffsetZ),
+        new THREE.Vector3(xPos + tickLen, floorY, 0 + activeOffsetZ),
+        new THREE.Vector3(xPos - tickLen, floorY, contWidM + activeOffsetZ),
+        new THREE.Vector3(xPos + tickLen, floorY, contWidM + activeOffsetZ)
+      );
+    });
+
+    if (tickPoints.length > 0) {
+      const tickGeo = new THREE.BufferGeometry().setFromPoints(tickPoints);
+      const tickMat = new THREE.LineBasicMaterial({
+        color: edgeColorHex,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false
+      });
+      const tickSegments = new THREE.LineSegments(tickGeo, tickMat);
+      guideGroup.add(tickSegments);
+    }
+
+    guideGroup.visible = true;
+
+    // Item dimensions in meters
     const lenM = ghostCoords.length / 1000;
     const heiM = ghostCoords.height / 1000;
     const widM = ghostCoords.width / 1000;
-
     const boxGeo = new THREE.BoxGeometry(lenM, heiM, widM);
-    const colorHex = !ghostCoords.isValid ? 0xef4444 : (isSnapped ? 0x06b6d4 : 0x10b981);
-    const boxMat = new THREE.MeshStandardMaterial({
-      color: colorHex,
-      transparent: true,
-      opacity: isSnapped ? 0.72 : 0.65,
-      roughness: 0.2,
-      metalness: 0.1,
-      emissive: new THREE.Color(colorHex),
-      emissiveIntensity: isSnapped ? 0.6 : 0.45
-    });
-
-    const mesh = new THREE.Mesh(boxGeo, boxMat);
-    group.add(mesh);
-
     const edgesGeo = new THREE.EdgesGeometry(boxGeo);
-    const edgeLineMat = new THREE.LineBasicMaterial({
-      color: !ghostCoords.isValid ? 0xb91c1c : (isSnapped ? 0x22d3ee : 0x047857),
-      linewidth: 3
-    });
-    const edgeLines = new THREE.LineSegments(edgesGeo, edgeLineMat);
-    group.add(edgeLines);
 
-    // Floor footprint projection outline at container floor showing alignment
-    const footprintOffsetDown = (ghostCoords.z / 1000);
-    const footprintGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(-lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, -widM / 2),
-      new THREE.Vector3(lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, -widM / 2),
-      new THREE.Vector3(lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, widM / 2),
-      new THREE.Vector3(-lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, widM / 2),
-      new THREE.Vector3(-lenM / 2, -heiM / 2 - footprintOffsetDown + 0.003, -widM / 2),
-    ]);
-    const footprintMat = new THREE.LineBasicMaterial({
-      color: !ghostCoords.isValid ? 0xdc2626 : (isSnapped ? 0x0891b2 : 0x059669),
+    // -------------------------------------------------------------
+    // BUILD DYNAMIC SNAP-INDICATOR: Wireframe Bounding Box at Nearest Valid Grid Position
+    // -------------------------------------------------------------
+    const isSnapValid = ghostCoords.isValid;
+    const snapWireColor = !isSnapValid ? 0xf43f5e : (isSnapped ? 0x06b6d4 : (hasGridSnap ? 0x0ea5e9 : 0x10b981));
+    const snapGlowColor = !isSnapValid ? 0xfb7185 : (isSnapped ? 0x22d3ee : (hasGridSnap ? 0x38bdf8 : 0x34d399));
+
+    // A. Wireframe bounding box outline
+    const snapWireMat = new THREE.LineBasicMaterial({
+      color: snapWireColor,
+      linewidth: 3,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false
+    });
+    const snapWireframe = new THREE.LineSegments(edgesGeo, snapWireMat);
+    snapGroup.add(snapWireframe);
+
+    // B. High-precision 3D Corner L-Brackets at all 8 corners of the bounding box
+    const bracketPoints: THREE.Vector3[] = [];
+    const hx = lenM / 2;
+    const hy = heiM / 2;
+    const hz = widM / 2;
+    const armX = Math.min(lenM * 0.22, 0.08);
+    const armY = Math.min(heiM * 0.22, 0.08);
+    const armZ = Math.min(widM * 0.22, 0.08);
+
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        for (const sz of [-1, 1]) {
+          const cx = sx * hx;
+          const cy = sy * hy;
+          const cz = sz * hz;
+          // X-arm
+          bracketPoints.push(new THREE.Vector3(cx, cy, cz), new THREE.Vector3(cx - sx * armX, cy, cz));
+          // Y-arm (height)
+          bracketPoints.push(new THREE.Vector3(cx, cy, cz), new THREE.Vector3(cx, cy - sy * armY, cz));
+          // Z-arm (width)
+          bracketPoints.push(new THREE.Vector3(cx, cy, cz), new THREE.Vector3(cx, cy, cz - sz * armZ));
+        }
+      }
+    }
+    const bracketGeo = new THREE.BufferGeometry().setFromPoints(bracketPoints);
+    const bracketMat = new THREE.LineBasicMaterial({
+      color: snapGlowColor,
+      linewidth: 4,
+      transparent: true,
+      opacity: 1.0,
+      depthWrite: false
+    });
+    snapGroup.add(new THREE.LineSegments(bracketGeo, bracketMat));
+
+    // C. Translucent Holographic Bounding Fill inside the snap target
+    const snapFillMat = new THREE.MeshBasicMaterial({
+      color: snapWireColor,
+      transparent: true,
+      opacity: isSnapValid ? 0.18 : 0.24,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    snapGroup.add(new THREE.Mesh(boxGeo, snapFillMat));
+
+    // D. Floor Footprint Landing Reticle under the snap position
+    const floorDropDistance = heiM / 2 + (ghostCoords.z / 1000);
+    const reticleY = -floorDropDistance + 0.003;
+    const footprintReticlePoints: THREE.Vector3[] = [
+      new THREE.Vector3(-hx, reticleY, -hz),
+      new THREE.Vector3(hx, reticleY, -hz),
+      new THREE.Vector3(hx, reticleY, hz),
+      new THREE.Vector3(-hx, reticleY, hz),
+      new THREE.Vector3(-hx, reticleY, -hz),
+    ];
+    const reticleGeo = new THREE.BufferGeometry().setFromPoints(footprintReticlePoints);
+    const reticleMat = new THREE.LineBasicMaterial({
+      color: snapWireColor,
       linewidth: 2,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.85
     });
-    const footprintLine = new THREE.Line(footprintGeo, footprintMat);
-    group.add(footprintLine);
+    snapGroup.add(new THREE.Line(reticleGeo, reticleMat));
 
-    // If grid snap is enabled, show an alignment crosshair at footprint center
-    if (gridSnapMm > 0) {
-      const crossPoints: THREE.Vector3[] = [
-        new THREE.Vector3(-lenM * 0.25, -heiM / 2 - footprintOffsetDown + 0.004, 0),
-        new THREE.Vector3(lenM * 0.25, -heiM / 2 - footprintOffsetDown + 0.004, 0),
-        new THREE.Vector3(0, -heiM / 2 - footprintOffsetDown + 0.004, -widM * 0.25),
-        new THREE.Vector3(0, -heiM / 2 - footprintOffsetDown + 0.004, widM * 0.25),
-      ];
-      const crossGeo = new THREE.BufferGeometry().setFromPoints(crossPoints);
-      const crossMat = new THREE.LineBasicMaterial({
-        color: isSnapped ? 0x06b6d4 : 0x0284c7, // Cyan or Sky blue crosshair
-        linewidth: 2,
+    // Footprint Crosshair at center
+    const crossPoints: THREE.Vector3[] = [
+      new THREE.Vector3(-hx * 0.35, reticleY + 0.001, 0),
+      new THREE.Vector3(hx * 0.35, reticleY + 0.001, 0),
+      new THREE.Vector3(0, reticleY + 0.001, -hz * 0.35),
+      new THREE.Vector3(0, reticleY + 0.001, hz * 0.35),
+    ];
+    snapGroup.add(new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(crossPoints),
+      new THREE.LineBasicMaterial({ color: snapGlowColor, linewidth: 2, transparent: true, opacity: 0.9 })
+    ));
+
+    // E. Dynamic Snapping Tether Line between smooth drag pointer and snap indicator
+    const rawDragX = ghostCoords.rawDragX !== undefined ? ghostCoords.rawDragX : ghostCoords.x;
+    const rawDragY = ghostCoords.rawDragY !== undefined ? ghostCoords.rawDragY : ghostCoords.y;
+    const rawDragZ = ghostCoords.rawDragZ !== undefined ? ghostCoords.rawDragZ : ghostCoords.z;
+
+    const dragDeltaX = (rawDragX - ghostCoords.x) / 1000;
+    const dragDeltaY = (rawDragZ - ghostCoords.z) / 1000;
+    const dragDeltaZ = (rawDragY - ghostCoords.y) / 1000;
+    const snapDistanceMm = Math.round(Math.hypot(rawDragX - ghostCoords.x, rawDragY - ghostCoords.y));
+
+    if (snapDistanceMm > 8) {
+      // Connects from Snap Center (0,0,0) to Drag Center (dragDeltaX, dragDeltaY, dragDeltaZ)
+      const tetherGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(dragDeltaX, dragDeltaY, dragDeltaZ)
+      ]);
+      const tetherMat = new THREE.LineDashedMaterial({
+        color: 0x38bdf8,
+        dashSize: 0.03,
+        gapSize: 0.02,
         transparent: true,
-        opacity: 0.9
+        opacity: 0.85,
+        depthWrite: false
       });
-      const crossLines = new THREE.LineSegments(crossGeo, crossMat);
-      group.add(crossLines);
+      const tetherLine = new THREE.Line(tetherGeo, tetherMat);
+      tetherLine.computeLineDistances();
+      snapGroup.add(tetherLine);
+
+      // Snap Center Target Beacon sphere
+      const beaconMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.018, 12, 12),
+        new THREE.MeshBasicMaterial({ color: snapGlowColor })
+      );
+      snapGroup.add(beaconMesh);
     }
 
-    group.position.set(
+    // F. If primary snap position is colliding, render nearest valid grid position preview
+    if (!isSnapValid && ghostCoords.nearestValidGridPos) {
+      const alt = ghostCoords.nearestValidGridPos;
+      const altDx = (alt.x - ghostCoords.x) / 1000;
+      const altDy = (alt.z - ghostCoords.z) / 1000;
+      const altDz = (alt.y - ghostCoords.y) / 1000;
+
+      const altBox = new THREE.LineSegments(
+        edgesGeo,
+        new THREE.LineDashedMaterial({
+          color: 0x10b981, // Emerald green for recommended valid grid spot
+          dashSize: 0.03,
+          gapSize: 0.02,
+          transparent: true,
+          opacity: 0.9,
+          depthWrite: false
+        })
+      );
+      altBox.computeLineDistances();
+      altBox.position.set(altDx, altDy, altDz);
+      snapGroup.add(altBox);
+    }
+
+    // Position the Snap Indicator Group firmly at the nearest valid grid position
+    snapGroup.position.set(
       (ghostCoords.x + ghostCoords.length / 2) / 1000,
       (ghostCoords.z + ghostCoords.height / 2) / 1000,
       (ghostCoords.y + ghostCoords.width / 2) / 1000 + activeOffsetZ
+    );
+    snapGroup.visible = true;
+
+    // -------------------------------------------------------------
+    // BUILD DRAGGED GHOST ITEM MESH (following continuous pointer)
+    // -------------------------------------------------------------
+    const ghostColorHex = !isDragValid ? 0xef4444 : (isSnapped ? 0x06b6d4 : 0x3b82f6);
+    const ghostMat = new THREE.MeshStandardMaterial({
+      color: ghostColorHex,
+      transparent: true,
+      opacity: 0.45, // Semi-transparent item following user drag
+      roughness: 0.3,
+      metalness: 0.1,
+      emissive: new THREE.Color(ghostColorHex),
+      emissiveIntensity: 0.4
+    });
+
+    const ghostMesh = new THREE.Mesh(boxGeo, ghostMat);
+    group.add(ghostMesh);
+
+    const ghostEdgeMat = new THREE.LineBasicMaterial({
+      color: !isDragValid ? 0xb91c1c : (isSnapped ? 0x22d3ee : 0x60a5fa),
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.7
+    });
+    group.add(new THREE.LineSegments(edgesGeo, ghostEdgeMat));
+
+    // Position ghost group at continuous drag position
+    group.position.set(
+      (rawDragX + ghostCoords.length / 2) / 1000,
+      (rawDragZ + ghostCoords.height / 2) / 1000,
+      (rawDragY + ghostCoords.width / 2) / 1000 + activeOffsetZ
     );
     group.visible = true;
   }, [isManualMode, ghostCoords, currentTab, containers, container, gridSnapMm, magneticSnapMm]);
@@ -1740,6 +2104,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           scene.remove(magneticGuideGroupRef.current);
           magneticGuideGroupRef.current = null;
         }
+        if (dragGuideLinesGroupRef.current) {
+          scene.remove(dragGuideLinesGroupRef.current);
+          dragGuideLinesGroupRef.current = null;
+        }
       }
     };
   }, []);
@@ -1806,21 +2174,29 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const width = isRot ? itemDim.length : itemDim.width;
       const height = itemDim.height;
 
-      let rawX = (hitPoint.x * 1000) - length / 2;
-      let rawY = ((hitPoint.z - targetOffsetZ) * 1000) - width / 2;
+      // 1. Continuous unsnapped pointer position in container space
+      const continuousUnclampedX = (hitPoint.x * 1000) - length / 2;
+      const continuousUnclampedY = ((hitPoint.z - targetOffsetZ) * 1000) - width / 2;
+      const continuousX = Math.max(0, Math.min(container.length - length, continuousUnclampedX));
+      const continuousY = Math.max(0, Math.min(container.width - width, continuousUnclampedY));
 
       const activeSnapMm = overrideSnapMm !== undefined ? overrideSnapMm : gridSnapMm;
 
-      if (activeSnapMm > 0) {
-        rawX = Math.round(rawX / activeSnapMm) * activeSnapMm;
-        rawY = Math.round(rawY / activeSnapMm) * activeSnapMm;
-      } else {
-        rawX = Math.round(rawX);
-        rawY = Math.round(rawY);
-      }
+      // 2. Nearest Grid Position
+      let gridX = continuousX;
+      let gridY = continuousY;
+      let isSnappedToGrid = false;
 
-      rawX = Math.max(0, Math.min(container.length - length, rawX));
-      rawY = Math.max(0, Math.min(container.width - width, rawY));
+      if (activeSnapMm > 0) {
+        gridX = Math.round(continuousX / activeSnapMm) * activeSnapMm;
+        gridY = Math.round(continuousY / activeSnapMm) * activeSnapMm;
+        gridX = Math.max(0, Math.min(container.length - length, gridX));
+        gridY = Math.max(0, Math.min(container.width - width, gridY));
+        isSnappedToGrid = true;
+      } else {
+        gridX = Math.round(continuousX);
+        gridY = Math.round(continuousY);
+      }
 
       const activeContLoad = (containers && containers.length > 0)
         ? (containers.find(c => c.containerIndex === targetContNum) || containers[0])
@@ -1829,18 +2205,19 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       const ignoreId = isDraggingExistingItem ? isDraggingExistingItem.id : undefined;
       const targetCont = activeContLoad?.container || container;
 
-      // Magnetic snap calculation (snaps flush to adjacent cargo edges, container walls, alignments)
-      let finalX = rawX;
-      let finalY = rawY;
-      let finalZ = calculateSupportHeight(rawX, rawY, length, width, contItems, ignoreId);
+      // Support heights for both continuous position and snapped position
+      const continuousZ = calculateSupportHeight(continuousX, continuousY, length, width, contItems, ignoreId);
+      let finalX = gridX;
+      let finalY = gridY;
+      let finalZ = calculateSupportHeight(gridX, gridY, length, width, contItems, ignoreId);
       let magResult: MagneticSnapCandidate | undefined;
 
       const activeMagMm = overrideMagSnapMm !== undefined ? overrideMagSnapMm : magneticSnapMm;
 
       if (activeMagMm > 0) {
         magResult = applyMagneticEdgeSnap(
-          rawX,
-          rawY,
+          gridX,
+          gridY,
           length,
           width,
           height,
@@ -1890,6 +2267,35 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
       const isValid = bounds.isValid && !restingOnFragile && !exceedsWeight && !collisionCheck.hasCollision;
 
+      // Intelligent nearest valid grid position discovery if primary snap is currently colliding
+      let nearestValidGridPos: { x: number; y: number; z: number } | undefined = undefined;
+      if (!isValid && activeSnapMm > 0) {
+        const testOffsets = [-1, 1, -2, 2, -3, 3];
+        let minD = Infinity;
+        for (const ox of [0, ...testOffsets]) {
+          for (const oy of [0, ...testOffsets]) {
+            if (ox === 0 && oy === 0) continue;
+            const candX = Math.max(0, Math.min(container.length - length, finalX + ox * activeSnapMm));
+            const candY = Math.max(0, Math.min(container.width - width, finalY + oy * activeSnapMm));
+            const candZ = calculateSupportHeight(candX, candY, length, width, contItems, ignoreId);
+            const b = checkContainerBounds(candX, candY, candZ, length, width, height, targetCont);
+            const f = isRestingOnFragile(candX, candY, candZ, length, width, contItems, ignoreId);
+            const c = check3DItemCollision(candX, candY, candZ, length, width, height, contItems, ignoreId);
+            if (b.isValid && !f && !c.hasCollision) {
+              const dist = Math.hypot(candX - continuousX, candY - continuousY);
+              if (dist < minD) {
+                minD = dist;
+                nearestValidGridPos = { x: candX, y: candY, z: candZ };
+              }
+            }
+          }
+        }
+      } else if (isValid) {
+        nearestValidGridPos = { x: finalX, y: finalY, z: finalZ };
+      }
+
+      const snapDistanceMm = Math.round(Math.hypot(continuousX - finalX, continuousY - finalY));
+
       return {
         x: finalX,
         y: finalY,
@@ -1901,11 +2307,32 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         invalidReason,
         offsetZ: targetOffsetZ,
         containerIndex: targetContNum,
-        magneticSnap: magResult
+        magneticSnap: magResult,
+        rawDragX: continuousX,
+        rawDragY: continuousY,
+        rawDragZ: continuousZ,
+        isSnappedToGrid,
+        snapDistanceMm,
+        nearestValidGridPos
       };
     };
 
     const handleMouseMove = (event: MouseEvent) => {
+      // Direct drag initiation for cargo box in manual mode
+      if (mouseDownCargoItem && (event.buttons === 1) && !isDraggingExistingItem && !heldUnplacedItem) {
+        const dx = Math.abs(event.clientX - mouseDownPos.x);
+        const dy = Math.abs(event.clientY - mouseDownPos.y);
+        if (dx > 5 || dy > 5) {
+          const targetItem = mouseDownCargoItem;
+          mouseDownCargoItem = null;
+          setIsDraggingExistingItem(targetItem);
+          isDraggingExistingItemRef.current = targetItem;
+          setInternalSelectedItem(null);
+          activeSelectedItemRef.current = null;
+          if (onSelectItem) onSelectItem(null);
+        }
+      }
+
       const activeHeld = heldUnplacedItem || (draggedUnplacedRef.current ? {
         unplaced: draggedUnplacedRef.current.unplaced,
         rotation: draggedUnplacedRef.current.rotation,
@@ -1958,8 +2385,17 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     };
 
     let mouseDownPos = { x: 0, y: 0 };
+    let mouseDownCargoItem: PackedItem | null = null;
+
     const handleMouseDown = (event: MouseEvent) => {
       mouseDownPos = { x: event.clientX, y: event.clientY };
+      if (isManualMode && event.button === 0 && !isDraggingExistingItem && !heldUnplacedItem && hoveredItem) {
+        mouseDownCargoItem = hoveredItem;
+      }
+    };
+
+    const handleMouseUp = () => {
+      mouseDownCargoItem = null;
     };
 
     const handleClick = (event: MouseEvent) => {
@@ -2475,6 +2911,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
     containerEl.addEventListener('contextmenu', handleContextMenu);
     containerEl.addEventListener('dragover', handleDragOver);
     containerEl.addEventListener('drop', handleDrop);
+    window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
@@ -2485,6 +2922,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       containerEl.removeEventListener('contextmenu', handleContextMenu);
       containerEl.removeEventListener('dragover', handleDragOver);
       containerEl.removeEventListener('drop', handleDrop);
+      window.removeEventListener('mouseup', handleMouseUp);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
@@ -2557,6 +2995,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
       {/* 3D Canvas Viewport */}
       <div 
         ref={containerRef} 
+        id="container-viewer-3d"
         className="w-full flex-1 relative bg-slate-50 select-none outline-none min-h-[400px]"
       >
         {webglError && (
@@ -2576,6 +3015,150 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             </button>
           </div>
         )}
+
+        {/* Visual Helper Overlay: Dynamic Snap-Indicator & Grid Alignment HUD */}
+        {isManualMode && ghostCoords && (() => {
+          const targetContNum = ghostCoords.containerIndex !== undefined 
+            ? ghostCoords.containerIndex 
+            : (typeof currentTab === 'number' ? currentTab : 1);
+          const activeTarget = (containers && containers.length > 0)
+            ? (containers.find((_, i) => (i + 1) === targetContNum)?.container || container)
+            : container;
+
+          const frontClearance = Math.max(0, activeTarget.length - ghostCoords.x - ghostCoords.length);
+          const rightClearance = Math.max(0, activeTarget.width - ghostCoords.y - ghostCoords.width);
+          const isMagSnapped = !!(ghostCoords.magneticSnap && (ghostCoords.magneticSnap.isSnappedX || ghostCoords.magneticSnap.isSnappedY));
+          const snapDist = ghostCoords.snapDistanceMm ?? 0;
+
+          return (
+            <div 
+              id="drag-grid-alignment-overlay"
+              className="absolute bottom-3 left-3 z-20 pointer-events-none transition-all duration-150 animate-in fade-in slide-in-from-bottom-2 select-none"
+            >
+              <div 
+                id="snap-indicator-card"
+                className="bg-slate-900/92 backdrop-blur-md text-white border border-cyan-500/40 rounded-xl px-3.5 py-2.5 shadow-2xl max-w-xs sm:max-w-sm space-y-2 text-xs"
+              >
+                {/* Header row: Dynamic Snap Indicator & Snap State Badges */}
+                <div className="flex items-center justify-between gap-2 border-b border-slate-700/70 pb-1.5">
+                  <div className="flex items-center gap-1.5 font-semibold text-slate-100">
+                    <Target className="w-3.5 h-3.5 text-cyan-400 animate-pulse shrink-0" />
+                    <span className="text-[12px]">{isJa ? 'スナップ位置インジケーター' : 'Snap Target Indicator'}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isMagSnapped ? (
+                      <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-400/60 text-[10px] font-bold text-cyan-300 flex items-center gap-0.5 shadow-xs">
+                        <Magnet className="w-2.5 h-2.5" />
+                        {isJa ? '端面吸着' : 'Magnetic'}
+                      </span>
+                    ) : gridSnapMm > 0 ? (
+                      <span className="px-1.5 py-0.5 rounded bg-sky-950/80 border border-sky-400/60 text-[10px] font-bold text-sky-300 shadow-xs">
+                        {gridSnapMm}mm {isJa ? 'グリッド' : 'Grid'}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 text-[10px] font-medium text-slate-300">
+                        {isJa ? '自由配置' : 'Free'}
+                      </span>
+                    )}
+
+                    {ghostCoords.isValid ? (
+                      <span className="px-1.5 py-0.5 rounded bg-emerald-950/90 border border-emerald-400/80 text-[10px] font-bold text-emerald-300 flex items-center gap-0.5 shadow-xs">
+                        <Check className="w-2.5 h-2.5" />
+                        {isJa ? '吸着可能' : 'Ready'}
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-950/90 border border-rose-500/80 text-[10px] font-bold text-rose-300 flex items-center gap-0.5 shadow-xs">
+                        <AlertCircle className="w-2.5 h-2.5" />
+                        {isJa ? '干渉NG' : 'Blocked'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Real-time Dynamic Snap Status Banner */}
+                <div className={`p-1.5 rounded-lg border text-[11px] flex items-center justify-between gap-1.5 ${
+                  ghostCoords.isValid 
+                    ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200' 
+                    : 'bg-rose-950/40 border-rose-500/50 text-rose-200'
+                }`}>
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      ghostCoords.isValid ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-rose-500 shadow-[0_0_8px_#f43f5e]'
+                    }`} />
+                    <span className="font-medium truncate">
+                      {ghostCoords.isValid 
+                        ? (isJa ? 'ワイヤーフレーム位置に自動吸着して固定' : 'Snaps to wireframe bounding box on release')
+                        : (ghostCoords.invalidReason || (isJa ? '干渉のためこの位置には配置できません' : 'Collision or exceeds boundary limits'))}
+                    </span>
+                  </div>
+                  {snapDist > 0 && (
+                    <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-slate-800 text-sky-300 border border-slate-700 shrink-0">
+                      Δ{snapDist}mm
+                    </span>
+                  )}
+                </div>
+
+                {/* Snapped Target Coordinates (3D Wireframe Position) */}
+                <div className="grid grid-cols-3 gap-1.5 text-center font-mono">
+                  <div className="bg-slate-800/80 rounded px-1.5 py-1 border border-slate-700/60">
+                    <div className="text-[9px] text-slate-400 font-sans">{isJa ? 'X (前後)' : 'X (Length)'}</div>
+                    <div className="font-bold text-cyan-300 text-[11px] truncate">{(ghostCoords.x / 1000).toFixed(3)}m</div>
+                    <div className="text-[9px] text-slate-400">{ghostCoords.x}mm</div>
+                  </div>
+                  <div className="bg-slate-800/80 rounded px-1.5 py-1 border border-slate-700/60">
+                    <div className="text-[9px] text-slate-400 font-sans">{isJa ? 'Y (左右)' : 'Y (Width)'}</div>
+                    <div className="font-bold text-cyan-300 text-[11px] truncate">{(ghostCoords.y / 1000).toFixed(3)}m</div>
+                    <div className="text-[9px] text-slate-400">{ghostCoords.y}mm</div>
+                  </div>
+                  <div className="bg-slate-800/80 rounded px-1.5 py-1 border border-slate-700/60">
+                    <div className="text-[9px] text-slate-400 font-sans">{isJa ? 'Z (高さ)' : 'Z (Height)'}</div>
+                    <div className="font-bold text-cyan-300 text-[11px] truncate">{(ghostCoords.z / 1000).toFixed(3)}m</div>
+                    <div className="text-[9px] text-slate-400">{ghostCoords.z}mm</div>
+                  </div>
+                </div>
+
+                {/* Nearest Valid Grid Recommendation if Collision */}
+                {!ghostCoords.isValid && ghostCoords.nearestValidGridPos && (
+                  <div className="px-2 py-1 rounded bg-emerald-950/40 border border-emerald-500/40 text-[10px] text-emerald-300 flex items-center justify-between">
+                    <span>{isJa ? '➔ 最寄り有効グリッド位置 (緑破線)' : '➔ Nearest valid grid spot (Green dashed)'}:</span>
+                    <span className="font-mono font-bold">
+                      X:{(ghostCoords.nearestValidGridPos.x / 1000).toFixed(2)}m Y:{(ghostCoords.nearestValidGridPos.y / 1000).toFixed(2)}m
+                    </span>
+                  </div>
+                )}
+
+                {/* Wall Clearances */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 text-[10px] text-slate-300">
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded px-1.5 py-0.5">
+                    <span className="text-slate-400">{isJa ? '奥壁' : 'Back'}:</span>
+                    <span className="font-mono font-semibold text-slate-200">{(ghostCoords.x / 1000).toFixed(2)}m</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded px-1.5 py-0.5">
+                    <span className="text-slate-400">{isJa ? '扉側' : 'Door'}:</span>
+                    <span className="font-mono font-semibold text-slate-200">{(frontClearance / 1000).toFixed(2)}m</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded px-1.5 py-0.5">
+                    <span className="text-slate-400">{isJa ? '左壁' : 'Left'}:</span>
+                    <span className="font-mono font-semibold text-slate-200">{(ghostCoords.y / 1000).toFixed(2)}m</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-800/50 rounded px-1.5 py-0.5">
+                    <span className="text-slate-400">{isJa ? '右壁' : 'Right'}:</span>
+                    <span className="font-mono font-semibold text-slate-200">{(rightClearance / 1000).toFixed(2)}m</span>
+                  </div>
+                </div>
+
+                {/* Keyboard hints footer */}
+                <div className="text-[10px] text-sky-300/80 pt-0.5 flex items-center justify-between border-t border-slate-800">
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping inline-block" />
+                    {isJa ? '3Dワイヤーフレーム吸着表示中' : '3D Snap Wireframe Active'}
+                  </span>
+                  <span className="text-slate-400">{isJa ? '[S] 刻み切替 • [Alt] 自由配置' : '[S] Snap • [Alt] Free'}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Top Floating Container Selector Tabs & Quick Badges */}

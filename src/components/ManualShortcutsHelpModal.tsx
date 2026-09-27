@@ -139,10 +139,26 @@ export const ManualShortcutsHelpModal: React.FC<ManualShortcutsHelpModalProps> =
 
               <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40">
                 <div>
-                  <span className="text-slate-800 dark:text-slate-200 font-bold">{isJa ? '3D視覚ガイドライン (シアン線)' : '3D Contact Guide Lines'}</span>
+                  <span className="text-slate-800 dark:text-slate-200 font-bold">{isJa ? '3Dグリッド整列ガイドライン' : '3D Grid Alignment Guide Lines'}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{isJa ? 'ドラッグ中に全長・全幅へ渡るグリッド基準線と壁面目盛りを3D空間へ自動投影' : 'Projects subtle grid-aligned axis lines and wall ticks in 3D during dragging'}</p>
+                </div>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-900/60 text-sky-800 dark:text-sky-300 font-mono font-semibold">3D Guide</span>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-cyan-200/80 dark:border-cyan-700/50 shadow-2xs">
+                <div>
+                  <span className="text-cyan-950 dark:text-cyan-200 font-bold">{isJa ? '動的スナップ・ワイヤーフレーム (Snap Indicator)' : 'Dynamic Snap Wireframe Indicator'}</span>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{isJa ? 'ドラッグ中に最寄り有効グリッド位置へコーナーブラケット付きの吸着枠をリアルタイム表示' : 'Renders wireframe bounding box with corner brackets at nearest valid grid spot'}</p>
+                </div>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 font-mono font-semibold">Snap Box</span>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40">
+                <div>
+                  <span className="text-slate-800 dark:text-slate-200 font-bold">{isJa ? '端面吸着ガイドライン (シアン線)' : 'Magnetic Snap Guide Lines'}</span>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">{isJa ? '端面吸着時に接合境界を鮮やかなシアン線と球マーカーで描画' : 'Vivid cyan lines & spheres highlight active edge contact'}</p>
                 </div>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 font-mono font-semibold">Visual</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 font-mono font-semibold">Contact</span>
               </div>
 
               <div className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded-lg border border-sky-200/60 dark:border-sky-700/40 col-span-1 sm:col-span-2">
