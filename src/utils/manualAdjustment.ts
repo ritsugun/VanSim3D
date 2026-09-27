@@ -609,17 +609,18 @@ export function applyManualItemMove(
   currentResult: PackingResult,
   targetContainer: Container,
   itemId: string,
-  newCoords: { x: number; y: number; z: number; rotationIndex?: number; length?: number; width?: number; height?: number }
+  newCoords: { x: number; y: number; z: number; rotationIndex?: number; length?: number; width?: number; height?: number; containerIndex?: number }
 ): PackingResult {
   const existingItem = currentResult.packedItems.find(p => p.id === itemId);
   if (!existingItem) return currentResult;
 
-  const targetContainerIndex = existingItem.containerIndex || 1;
+  const targetContainerIndex = newCoords.containerIndex ?? existingItem.containerIndex ?? 1;
 
   const updatedAllPackedItems = currentResult.packedItems.map(item => {
     if (item.id === itemId) {
       return {
         ...item,
+        containerIndex: targetContainerIndex,
         x: Math.round(newCoords.x),
         y: Math.round(newCoords.y),
         z: Math.round(newCoords.z),
@@ -639,24 +640,20 @@ export function applyManualItemMove(
 
   let updatedContainers: ContainerLoad[] = [];
   if (currentResult.containers && currentResult.containers.length > 0) {
+    const movedItemObj = updatedAllPackedItems.find(p => p.id === itemId)!;
     updatedContainers = currentResult.containers.map(cLoad => {
-      const newContPacked = cLoad.packedItems.map(item => {
-        if (item.id === itemId) {
-          return {
-            ...item,
-            x: Math.round(newCoords.x),
-            y: Math.round(newCoords.y),
-            z: Math.round(newCoords.z),
-            length: newCoords.length ?? item.length,
-            width: newCoords.width ?? item.width,
-            height: newCoords.height ?? item.height,
-            rotationIndex: newCoords.rotationIndex ?? item.rotationIndex,
-            layer: Math.floor(newCoords.z / Math.max(100, newCoords.height ?? item.height)) + 1,
-            isManual: true
-          };
+      const cIdx = cLoad.containerIndex ?? 1;
+      let newContPacked: PackedItem[];
+      if (cIdx === targetContainerIndex) {
+        const exists = cLoad.packedItems.some(p => p.id === itemId);
+        if (exists) {
+          newContPacked = cLoad.packedItems.map(item => item.id === itemId ? movedItemObj : item);
+        } else {
+          newContPacked = [...cLoad.packedItems, movedItemObj];
         }
-        return item;
-      });
+      } else {
+        newContPacked = cLoad.packedItems.filter(item => item.id !== itemId);
+      }
       const newContMetrics = recalculateContainerMetrics(
         cLoad.container,
         newContPacked,

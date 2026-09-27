@@ -61,6 +61,8 @@ export default function App() {
     totalWeightKg: number;
     warnings: string[];
     importedAt: Date;
+    isExportCurrentPlan?: boolean;
+    algorithmName?: string;
   } | null>(null);
 
   const handleAllClearFromApp = () => {
@@ -196,7 +198,7 @@ export default function App() {
     recordManualAdjustment(next);
   }, [selectedContainer, activeContainerIndex, recordManualAdjustment, cargoList]);
 
-  const handleManualMoveItem = useCallback((itemId: string, newCoords: { x: number; y: number; z: number; length?: number; width?: number; height?: number; rotationIndex?: number }) => {
+  const handleManualMoveItem = useCallback((itemId: string, newCoords: { x: number; y: number; z: number; length?: number; width?: number; height?: number; rotationIndex?: number; containerIndex?: number }) => {
     const next = applyManualItemMove(packingResultRef.current, selectedContainer, itemId, newCoords);
     recordManualAdjustment(next);
     const moved = next.packedItems.find(p => p.id === itemId);
@@ -259,7 +261,7 @@ export default function App() {
     }, 30);
   }, [selectedContainer, cargoList, effectiveAlgorithm, containerCountMode, containerCount, effectiveGaConfig]);
 
-  // Handle faithful reproduction of 3D packing plan from external Loading_Manifest
+  // Handle faithful reproduction of 3D packing plan from external Loading_Manifest or Export Current Plan
   const handleApplyManifestResult = useCallback((
     newPackingResult: PackingResult,
     reconstructedCargo: CargoItem[],
@@ -269,6 +271,8 @@ export default function App() {
       totalItems: number;
       totalWeightKg: number;
       warnings: string[];
+      isExportCurrentPlan?: boolean;
+      algorithmName?: string;
     }
   ) => {
     setSelectedContainer(detectedContainer);

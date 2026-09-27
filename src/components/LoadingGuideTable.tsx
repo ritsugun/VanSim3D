@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { PackedItem, Language, UnitSystem, Container, ContainerLoad, PackingMetrics, OverallPackingMetrics, UnplacedItem } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { PackedItem, CargoItem, Language, UnitSystem, Container, ContainerLoad, PackingMetrics, OverallPackingMetrics, UnplacedItem } from '../types';
 import { 
   ClipboardList, Search, FileOutput, Printer, FileText, FileSpreadsheet, FileInput,
-  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box, ArrowDownToLine, Sparkles, RefreshCw
+  ShieldAlert, Check, ArrowUpDown, Filter, Eye, Box, ArrowDownToLine, Sparkles, RefreshCw,
+  Download, ChevronDown, FileCode, Upload
 } from 'lucide-react';
 import { formatDimensions, formatCoordinates, formatWeightCompact } from '../utils/units';
 import { WarehousePdfExportModal } from './WarehousePdfExportModal';
@@ -21,6 +22,7 @@ interface LoadingGuideTableProps {
   metrics?: PackingMetrics;
   overallMetrics?: OverallPackingMetrics;
   unplacedItems?: UnplacedItem[];
+  cargoList?: CargoItem[];
   algorithmName?: string;
   hasManualAdjustments?: boolean;
   onOpenImportManifest?: () => void;
@@ -42,6 +44,7 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
   metrics,
   overallMetrics,
   unplacedItems = [],
+  cargoList = [],
   algorithmName = 'Extreme Points 3D (BFD)',
   hasManualAdjustments = false,
   onOpenImportManifest,
@@ -55,6 +58,20 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
   const [sortField, setSortField] = useState<'seq' | 'weight' | 'name' | 'z' | 'container'>('seq');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
+  const [showExportPlanDropdown, setShowExportPlanDropdown] = useState<boolean>(false);
+  const exportPlanDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close Export Current Plan dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('#export-current-plan-btn') && !target.closest('#export-current-plan-dropdown')) {
+        setShowExportPlanDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const isJa = language === 'ja';
   const hasMultipleContainers = containers && containers.length > 1;
@@ -237,6 +254,232 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
     window.print();
   };
 
+  // Export Current Plan as structured JSON (all 3D coordinates, orientations & container metadata)
+  const handleExportPlanJson = () => {
+    const containerList = (hasMultipleContainers ? containers : [
+      {
+        containerIndex: 1,
+        container,
+        packedItems: allPackedItems,
+        metrics: effectiveMetrics
+      }
+    ]).map(c => ({
+      containerIndex: c.containerIndex ?? 1,
+      containerId: c.container?.id || container.id,
+      containerName: c.container?.name || container.name,
+      dimensionsMm: {
+        length: c.container?.length || container.length,
+        width: c.container?.width || container.width,
+        height: c.container?.height || container.height
+      },
+      volumeCbm: Number((((c.container?.length || container.length) * (c.container?.width || container.width) * (c.container?.height || container.height)) / 1e9).toFixed(3)),
+      maxWeightKg: c.container?.maxWeight || container.maxWeight,
+      tareWeightKg: c.container?.tareWeight || container.tareWeight || 0,
+      metrics: {
+        packedCount: c.packedItems.length,
+        packedWeightKg: c.packedItems.reduce((s, it) => s + it.weight, 0),
+        packedVolumeCbm: Number((c.packedItems.reduce((s, it) => s + (it.length * it.width * it.height) / 1e9, 0)).toFixed(3)),
+        volumeUtilizationPercent: Number((c.metrics?.volumeUtilization ?? 0).toFixed(2)),
+        weightUtilizationPercent: Number((c.metrics?.weightUtilization ?? 0).toFixed(2)),
+        centerOfGravityMm: c.metrics?.centerOfGravity ? {
+          x: Math.round(c.metrics.centerOfGravity.x),
+          y: Math.round(c.metrics.centerOfGravity.y),
+          z: Math.round(c.metrics.centerOfGravity.z)
+        } : undefined
+      },
+      itemCount: c.packedItems.length
+    }));
+
+    const planData = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      software: "AI 3D Container Loading Planner",
+      algorithm: algorithmName,
+      hasManualAdjustments,
+      container: {
+        id: container.id,
+        name: container.name,
+        category: container.category,
+        dimensionsMm: {
+          length: container.length,
+          width: container.width,
+          height: container.height
+        },
+        volumeCbm: Number(((container.length * container.width * container.height) / 1e9).toFixed(3)),
+        maxPayloadWeightKg: container.maxWeight,
+        tareWeightKg: container.tareWeight || 0,
+        costEstimate: container.costEstimate
+      },
+      summary: {
+        totalContainers: hasMultipleContainers ? containers.length : 1,
+        totalPackedItems: allPackedItems.length,
+        totalPackedWeightKg: Math.round(allPackedItems.reduce((s, p) => s + p.weight, 0)),
+        totalPackedVolumeCbm: Number((allPackedItems.reduce((s, p) => s + (p.length * p.width * p.height) / 1e9, 0)).toFixed(3)),
+        volumeUtilizationPercent: Number((effectiveMetrics.volumeUtilization || 0).toFixed(2)),
+        weightUtilizationPercent: Number((effectiveMetrics.weightUtilization || 0).toFixed(2)),
+        unplacedItemsCount: unplacedItems.reduce((s, u) => s + u.count, 0),
+        centerOfGravityMm: {
+          x: Math.round(effectiveMetrics.centerOfGravity?.x ?? container.length / 2),
+          y: Math.round(effectiveMetrics.centerOfGravity?.y ?? container.width / 2),
+          z: Math.round(effectiveMetrics.centerOfGravity?.z ?? container.height / 2)
+        },
+        axleDistribution: effectiveMetrics.axleDistribution
+      },
+      containers: containerList,
+      packedItems: allPackedItems.map(p => ({
+        sequenceNumber: p.sequenceNumber,
+        containerIndex: p.containerIndex || 1,
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        positionMm: {
+          x: Math.round(p.x),
+          y: Math.round(p.y),
+          z: Math.round(p.z)
+        },
+        dimensionsMm: {
+          length: Math.round(p.length),
+          width: Math.round(p.width),
+          height: Math.round(p.height)
+        },
+        orientation: {
+          rotationIndex: p.rotationIndex ?? 0,
+          isRotatedYaw: (p.rotationIndex ?? 0) === 1,
+          yawDegrees: (p.rotationIndex ?? 0) === 1 ? 90 : 0,
+          description: (p.rotationIndex ?? 0) === 1 ? 'Rotated 90° (Yaw)' : 'Standard 0°'
+        },
+        weightKg: p.weight,
+        cumulativeWeightKg: cumulativeWeights.get(p.sequenceNumber) || p.weight,
+        layer: p.layer,
+        fragile: !!p.fragile,
+        floorPlacement: !!p.floorPlacement,
+        color: p.color,
+        isManual: !!p.isManual
+      })),
+      unplacedItems: unplacedItems.map(u => ({
+        sku: u.sku,
+        name: u.name,
+        count: u.count,
+        dimensionsMm: u.dimensions,
+        weightKg: u.weight,
+        reason: u.reason
+      })),
+      cargoList: (cargoList || []).map(c => ({
+        id: c.id,
+        sku: c.sku,
+        name: c.name,
+        length: c.length,
+        width: c.width,
+        height: c.height,
+        weight: c.weight,
+        quantity: c.quantity,
+        color: c.color,
+        allowYaw: c.allowYaw,
+        fragile: !!c.fragile,
+        floorPlacement: !!c.floorPlacement,
+        priority: c.priority ?? (c.weight > 200 ? 1 : 3),
+        enabled: c.enabled !== false
+      }))
+    };
+
+    const jsonStr = JSON.stringify(planData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Loading_Plan_${container.id}_${new Date().toISOString().slice(0, 10)}.json`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export Current Plan as structured CSV (with container metadata, 3D positions, and orientations)
+  const handleExportPlanCsv = () => {
+    const metaCommentRows = [
+      `# AI 3D Container Loading Planner - Current Loading Plan Export`,
+      `# Exported At: ${new Date().toISOString()}`,
+      `# Container: ${container.name} (${container.id}) | Dimensions: ${container.length}x${container.width}x${container.height} mm | Volume: ${((container.length * container.width * container.height) / 1e9).toFixed(2)} m3 | Max Payload: ${container.maxWeight} kg`,
+      `# Algorithm: ${algorithmName} | Total Packed: ${allPackedItems.length} pcs | Total Weight: ${Math.round(allPackedItems.reduce((s, p) => s + p.weight, 0))} kg | Volume Util: ${effectiveMetrics.volumeUtilization.toFixed(1)}% | Weight Util: ${effectiveMetrics.weightUtilization.toFixed(1)}%`,
+      `# CoG: X=${Math.round(effectiveMetrics.centerOfGravity?.x ?? 0)}mm, Y=${Math.round(effectiveMetrics.centerOfGravity?.y ?? 0)}mm, Z=${Math.round(effectiveMetrics.centerOfGravity?.z ?? 0)}mm`,
+      `#`
+    ];
+
+    const headers = [
+      'Sequence_No',
+      'Container_No',
+      'Container_ID',
+      'Container_Length_mm',
+      'Container_Width_mm',
+      'Container_Height_mm',
+      'Item_Name',
+      'SKU',
+      'Pos_X_mm',
+      'Pos_Y_mm',
+      'Pos_Z_mm',
+      'Dim_Length_mm',
+      'Dim_Width_mm',
+      'Dim_Height_mm',
+      'Weight_kg',
+      'Cumulative_Weight_kg',
+      'Rotation_Index',
+      'Orientation_Yaw_Deg',
+      'Layer',
+      'Fragile',
+      'Floor_Placement',
+      'Color',
+      'Manual_Adjusted'
+    ];
+
+    const rows = allPackedItems.map(p => {
+      const cObj = (containers && p.containerIndex)
+        ? (containers.find(c => c.containerIndex === p.containerIndex)?.container || container)
+        : container;
+
+      return [
+        p.sequenceNumber,
+        p.containerIndex || 1,
+        `"${cObj.id}"`,
+        cObj.length,
+        cObj.width,
+        cObj.height,
+        `"${p.name.replace(/"/g, '""')}"`,
+        `"${p.sku.replace(/"/g, '""')}"`,
+        Math.round(p.x),
+        Math.round(p.y),
+        Math.round(p.z),
+        Math.round(p.length),
+        Math.round(p.width),
+        Math.round(p.height),
+        p.weight,
+        cumulativeWeights.get(p.sequenceNumber) || p.weight,
+        p.rotationIndex ?? 0,
+        (p.rotationIndex ?? 0) === 1 ? 90 : 0,
+        p.layer,
+        p.fragile ? 1 : 0,
+        p.floorPlacement ? 1 : 0,
+        `"${p.color}"`,
+        p.isManual ? 1 : 0
+      ];
+    });
+
+    const csvContent = '\uFEFF' + [
+      ...metaCommentRows,
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Loading_Plan_${container.id}_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div id="loading-guide-table-root" className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs text-slate-800 flex flex-col">
       {/* Manifest Replay Mode Ribbon if active */}
@@ -338,8 +581,143 @@ export const LoadingGuideTable: React.FC<LoadingGuideTableProps> = ({
             </select>
           </div>
 
-          {/* Right: Unified Export Group & Import Action */}
+          {/* Right: Export Current Plan, Unified Export Group & Import Action */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Export Current Plan Button & Dropdown */}
+            <div className="relative" ref={exportPlanDropdownRef}>
+              <button
+                type="button"
+                id="export-current-plan-btn"
+                onClick={() => setShowExportPlanDropdown(prev => !prev)}
+                title={isJa ? '現在の積載計画（座標・回転・コンテナ仕様）を出力' : 'Export Current Plan with positions, orientations & container metadata (JSON/CSV)'}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer text-xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isJa ? '計画を出力 (Export Current Plan)' : 'Export Current Plan'}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showExportPlanDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showExportPlanDropdown && (
+                <div 
+                  id="export-current-plan-dropdown"
+                  className="absolute right-0 mt-1.5 w-72 bg-white border border-slate-200 rounded-xl shadow-lg z-30 py-1.5 animate-fadeIn text-slate-800"
+                >
+                  <div className="px-3 py-1.5 border-b border-slate-100 text-[11px] text-slate-500 font-medium">
+                    {isJa ? '出力形式を選択 (外部システム・API連携用)' : 'Select Format (For External Systems & APIs)'}
+                  </div>
+
+                  {/* JSON Option */}
+                  <button
+                    type="button"
+                    id="export-plan-json-btn"
+                    onClick={() => {
+                      handleExportPlanJson();
+                      setShowExportPlanDropdown(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-blue-50/80 flex items-start gap-2.5 transition-colors cursor-pointer group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 font-mono font-bold text-xs mt-0.5 group-hover:bg-amber-200">
+                      <FileCode className="w-4 h-4 text-amber-700" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-slate-900 group-hover:text-blue-900">
+                          {isJa ? '構造化 JSON (.json)' : 'Structured JSON (.json)'}
+                        </span>
+                        <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold">
+                          JSON
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                        {isJa 
+                          ? '3D座標(X,Y,Z)・回転角・コンテナ仕様・物理計算メトリクス' 
+                          : '3D coords, orientations, container metadata & physical metrics'}
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* CSV Option */}
+                  <button
+                    type="button"
+                    id="export-plan-csv-btn"
+                    onClick={() => {
+                      handleExportPlanCsv();
+                      setShowExportPlanDropdown(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-blue-50/80 flex items-start gap-2.5 transition-colors cursor-pointer group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5 group-hover:bg-blue-200">
+                      <FileOutput className="w-4 h-4 text-blue-700" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-slate-900 group-hover:text-blue-900">
+                          {isJa ? '詳細積載 CSV (.csv)' : 'Structured CSV (.csv)'}
+                        </span>
+                        <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold">
+                          CSV
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                        {isJa 
+                          ? 'コンテナ寸法・3D座標・回転角・段数付きの表形式データ' 
+                          : 'Tabular data with container specs, 3D coords, rotation & layers'}
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Divider */}
+                  <div className="my-1 border-t border-slate-100" />
+
+                  {/* Import Link from Dropdown */}
+                  {onOpenImportManifest && (
+                    <button
+                      type="button"
+                      id="export-dropdown-import-plan-btn"
+                      onClick={() => {
+                        setShowExportPlanDropdown(false);
+                        onOpenImportManifest();
+                      }}
+                      className="w-full text-left px-3 py-2 hover:bg-emerald-50/80 flex items-start gap-2.5 transition-colors cursor-pointer group"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5 group-hover:bg-emerald-200">
+                        <Upload className="w-4 h-4 text-emerald-700" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs text-slate-900 group-hover:text-emerald-900">
+                            {isJa ? '計画データ(JSON/CSV)を取込' : 'Import Plan File'}
+                          </span>
+                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] px-1.5 py-0.2 rounded font-mono font-bold">
+                            IMPORT
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                          {isJa 
+                            ? 'Export Current Planの出力データ(JSON/CSV)を読み込んで3D再現' 
+                            : 'Load JSON/CSV plan data to reproduce exact 3D layout'}
+                        </p>
+                      </div>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Direct Import Plan Button paired with Export Current Plan */}
+            {onOpenImportManifest && (
+              <button
+                type="button"
+                id="import-current-plan-btn"
+                onClick={onOpenImportManifest}
+                title={isJa ? 'Export Current Planの出力データ(JSON/CSV)やマニフェストを取込して3D再現' : 'Import Exported Plan (JSON/CSV) or Loading Manifest'}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer text-xs"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>{isJa ? '計画を取込 (Import Plan)' : 'Import Plan'}</span>
+              </button>
+            )}
+
             {/* Unified Export Group (PDF | Excel | CSV | Print) */}
             <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white shadow-2xs divide-x divide-slate-200 overflow-hidden">
               {/* PDF Manifest Export */}

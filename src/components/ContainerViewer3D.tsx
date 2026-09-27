@@ -37,7 +37,7 @@ interface ContainerViewer3DProps {
   unplacedItems?: UnplacedItem[];
   cargoList?: CargoItem[];
   onManualPlaceItem?: (unplacedItem: UnplacedItem, placement: { x: number; y: number; z: number; length: number; width: number; height: number; rotationIndex?: number; color?: string; containerIndex?: number }) => void;
-  onManualMoveItem?: (itemId: string, newCoords: { x: number; y: number; z: number; rotationIndex?: number; length?: number; width?: number; height?: number }) => void;
+  onManualMoveItem?: (itemId: string, newCoords: { x: number; y: number; z: number; rotationIndex?: number; length?: number; width?: number; height?: number; containerIndex?: number }) => void;
   onManualRemoveItem?: (itemId: string) => void;
   onManualUnloadContainer?: (containerIndex?: number | 'all') => void;
   onResetToAlgorithm?: () => void;
@@ -2108,6 +2108,10 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
           scene.remove(dragGuideLinesGroupRef.current);
           dragGuideLinesGroupRef.current = null;
         }
+        if (snapIndicatorGroupRef.current) {
+          scene.remove(snapIndicatorGroupRef.current);
+          snapIndicatorGroupRef.current = null;
+        }
       }
     };
   }, []);
@@ -2325,6 +2329,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
         if (dx > 5 || dy > 5) {
           const targetItem = mouseDownCargoItem;
           mouseDownCargoItem = null;
+          isMouseDragRepositioning = true;
           setIsDraggingExistingItem(targetItem);
           isDraggingExistingItemRef.current = targetItem;
           setInternalSelectedItem(null);
@@ -2386,19 +2391,81 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
 
     let mouseDownPos = { x: 0, y: 0 };
     let mouseDownCargoItem: PackedItem | null = null;
+    let isMouseDragRepositioning = false;
+    let justCompletedDragDrop = false;
 
     const handleMouseDown = (event: MouseEvent) => {
       mouseDownPos = { x: event.clientX, y: event.clientY };
+      justCompletedDragDrop = false;
       if (isManualMode && event.button === 0 && !isDraggingExistingItem && !heldUnplacedItem && hoveredItem) {
         mouseDownCargoItem = hoveredItem;
+        isMouseDragRepositioning = false;
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (event: MouseEvent) => {
       mouseDownCargoItem = null;
+
+      // When dragging an existing cargo box, confirm drop immediately on mouse up (resolves two-click requirement)
+      const currentDragging = isDraggingExistingItemRef.current;
+      if (isManualMode && isMouseDragRepositioning && currentDragging && onManualMoveItem) {
+        isMouseDragRepositioning = false;
+        justCompletedDragDrop = true;
+
+        const itemDim = {
+          length: currentDragging.length,
+          width: currentDragging.width,
+          height: currentDragging.height,
+          rotation: 0
+        };
+        const effectiveSnapMm = event.altKey 
+          ? (gridSnapMm > 0 ? 0 : (lastNonZeroGridSnapMm.current || 50)) 
+          : gridSnapMm;
+        const effectiveMagSnapMm = event.altKey ? 0 : magneticSnapMm;
+        const place = calculatePlacementAtMouse(event.clientX, event.clientY, itemDim, effectiveSnapMm, effectiveMagSnapMm);
+
+        if (place && place.isValid) {
+          const targetContNum = place.containerIndex ?? currentDragging.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1);
+          onManualMoveItem(currentDragging.id, {
+            x: place.x,
+            y: place.y,
+            z: place.z,
+            length: place.length,
+            width: place.width,
+            height: place.height,
+            rotationIndex: currentDragging.rotationIndex,
+            containerIndex: targetContNum
+          });
+
+          const snapDesc = place.magneticSnap && (place.magneticSnap.isSnappedX || place.magneticSnap.isSnappedY)
+            ? (place.magneticSnap.snappedItem
+                ? (language === 'ja' ? ` (🧲「${place.magneticSnap.snappedItem.name}」の端面に吸着)` : ` (🧲 Snapped to "${place.magneticSnap.snappedItem.name}")`)
+                : (language === 'ja' ? ' (🧲 端面吸着)' : ' (🧲 Edge snapped)'))
+            : '';
+
+          showToast(language === 'ja'
+            ? `「${currentDragging.name}」の位置を変更しました (X:${formatMeters(place.x)}m Y:${formatMeters(place.y)}m Z:${formatMeters(place.z)}m)${snapDesc}`
+            : `Moved "${currentDragging.name}" to (X:${formatMeters(place.x)}m, Y:${formatMeters(place.y)}m, Z:${formatMeters(place.z)}m)${snapDesc}`);
+        } else {
+          showToast(place?.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません (元の位置に戻しました)' : 'Cannot move item: exceeds container constraints (reverted)'));
+        }
+
+        setIsDraggingExistingItem(null);
+        isDraggingExistingItemRef.current = null;
+        setGhostCoords(null);
+        return;
+      }
+
+      isMouseDragRepositioning = false;
     };
 
     const handleClick = (event: MouseEvent) => {
+      // If a drag-and-drop was just completed on mouseUp, swallow this click event
+      if (justCompletedDragDrop) {
+        justCompletedDragDrop = false;
+        return;
+      }
+
       // Ignore click if user was dragging/orbiting the camera (moved > 5px)
       const dx = Math.abs(event.clientX - mouseDownPos.x);
       const dy = Math.abs(event.clientY - mouseDownPos.y);
@@ -2422,6 +2489,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             showToast(place.invalidReason || (language === 'ja' ? 'コンテナの制限を超過しているため配置できません' : 'Cannot move item: exceeds container constraints'));
             return;
           }
+          const targetContNum = place.containerIndex ?? isDraggingExistingItem.containerIndex ?? (typeof currentTab === 'number' ? currentTab : 1);
           onManualMoveItem(isDraggingExistingItem.id, {
             x: place.x,
             y: place.y,
@@ -2429,7 +2497,8 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             length: place.length,
             width: place.width,
             height: place.height,
-            rotationIndex: isDraggingExistingItem.rotationIndex
+            rotationIndex: isDraggingExistingItem.rotationIndex,
+            containerIndex: targetContNum
           });
 
           const snapDesc = place.magneticSnap && (place.magneticSnap.isSnappedX || place.magneticSnap.isSnappedY)
@@ -2442,6 +2511,7 @@ export const ContainerViewer3D: React.FC<ContainerViewer3DProps> = ({
             ? `「${isDraggingExistingItem.name}」の位置を変更しました (X:${formatMeters(place.x)}m Y:${formatMeters(place.y)}m Z:${formatMeters(place.z)}m)${snapDesc}`
             : `Moved "${isDraggingExistingItem.name}" to (X:${formatMeters(place.x)}m, Y:${formatMeters(place.y)}m, Z:${formatMeters(place.z)}m)${snapDesc}`);
           setIsDraggingExistingItem(null);
+          isDraggingExistingItemRef.current = null;
           setGhostCoords(null);
           return;
         }

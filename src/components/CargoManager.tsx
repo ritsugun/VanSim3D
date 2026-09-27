@@ -286,14 +286,14 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
   const handleDownloadExcelTemplate = () => {
     const headers = ['貨物名', '幅(mm)', '高さ(mm)', '奥行(mm)', '重量(kg)', '個数', '横回転許可(1/0)', 'カラー(16進数)', '割れ物(1/0)', '床置き(1/0)', '積載対象(1/0)'];
     const sampleRows = [
-      ['CMB-M108V-KB1', 1100, 1230, 700, 125, 1, 1, '#ef4444', 0, 0, 0],
-      ['PURY-P350YNW-A2', 1270, 1920, 760, 292, 5, 1, '#f97316', 1, 1, 0],
-      ['PURY-M200YNW-A1', 950, 1920, 760, 244, 2, 1, '#ec4899', 1, 1, 0],
-      ['CMB-M104V-J1', 1070, 380, 700, 32, 2, 1, '#3b82f6', 0, 0, 0],
-      ['CMB-M104V-KB1', 1100, 1230, 700, 101, 1, 1, '#14b8a6', 0, 0, 0],
-      ['CMB-M106V-J1', 1070, 380, 700, 35, 5, 1, '#d97706', 0, 0, 0],
-      ['CMB-M108V-J1', 1070, 380, 700, 39, 5, 1, '#059669', 0, 0, 0],
-      ['CMB-M1012V-J1', 1380, 380, 840, 58, 10, 1, '#0284c7', 0, 0, 0]
+      ['CMB-M108V-KB1', 1100, 1230, 700, 125, 1, 1, '#ef4444', 0, 0, 1],
+      ['PURY-P350YNW-A2', 1270, 1920, 760, 292, 5, 1, '#f97316', 1, 1, 1],
+      ['PURY-M200YNW-A1', 950, 1920, 760, 244, 2, 1, '#ec4899', 1, 1, 1],
+      ['CMB-M104V-J1', 1070, 380, 700, 32, 2, 1, '#3b82f6', 0, 0, 1],
+      ['CMB-M104V-KB1', 1100, 1230, 700, 101, 1, 1, '#14b8a6', 0, 0, 1],
+      ['CMB-M106V-J1', 1070, 380, 700, 35, 5, 1, '#d97706', 0, 0, 1],
+      ['CMB-M108V-J1', 1070, 380, 700, 39, 5, 1, '#059669', 0, 0, 1],
+      ['CMB-M1012V-J1', 1380, 380, 840, 58, 10, 1, '#0284c7', 0, 0, 1]
     ];
     const ws = XLSX.utils.aoa_to_sheet([headers, ...sampleRows]);
     ws['!cols'] = [
@@ -361,13 +361,18 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     if (depthIdx === -1) depthIdx = 3;
     if (weightIdx === -1) weightIdx = 4;
     
-    const isOld10Col = headerParts.length >= 10 || (minQtyIdx !== -1 && minQtyIdx !== qtyIdx);
+    // In standard 10 or 11 column files, col 5 is quantity
+    const hasExplicitMinQty = minQtyIdx !== -1 && minQtyIdx !== qtyIdx;
     if (qtyIdx === -1) {
-      qtyIdx = isOld10Col ? 6 : 5;
+      qtyIdx = hasExplicitMinQty ? 6 : 5;
     }
-    if (rotIdx === -1) rotIdx = isOld10Col ? 7 : 6;
-    if (colorIdx === -1) colorIdx = isOld10Col ? 8 : 7;
-    if (fragileIdx === -1) fragileIdx = isOld10Col ? 9 : 8;
+    if (rotIdx === -1) rotIdx = hasExplicitMinQty ? 7 : 6;
+    if (colorIdx === -1) colorIdx = hasExplicitMinQty ? 8 : 7;
+    if (fragileIdx === -1) fragileIdx = hasExplicitMinQty ? 9 : 8;
+    if (floorIdx === -1) floorIdx = hasExplicitMinQty ? 10 : 9;
+    if (enabledIdx === -1 && headerParts.length >= (hasExplicitMinQty ? 12 : 11)) {
+      enabledIdx = hasExplicitMinQty ? 11 : 10;
+    }
 
     const newItems: CargoItem[] = [];
     const dataRows = nonEmptyRows.slice(headerRowIndex + 1);
@@ -420,8 +425,9 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
         isFloorPlacement = rawFloor === '1' || rawFloor === 'true' || rawFloor === 'yes' || rawFloor === '床置き' || rawFloor === '要';
       }
 
-      // Explicit Enabled / Selected Flag Check - Default initial state is Deselect (enabled: false) per user request
-      let isEnabled = false;
+      // Explicit Enabled / Selected Flag Check
+      // If 11th column is provided, parse 1/0; if omitted in the file, default to true (enabled)
+      let isEnabled = true;
       if (enabledIdx !== -1 && parts[enabledIdx] !== undefined && parts[enabledIdx] !== '') {
         const rawEn = String(parts[enabledIdx]).toLowerCase().trim();
         isEnabled = rawEn === '1' || rawEn === 'true' || rawEn === 'yes' || rawEn === 'ok' || rawEn === '対象' || rawEn === '選択' || rawEn === 'select';
@@ -451,10 +457,17 @@ export const CargoManager: React.FC<CargoManagerProps> = ({
     if (newItems.length > 0) {
       onChangeCargoList(newItems);
       const totalUnits = newItems.reduce((sum, item) => sum + item.quantity, 0);
+      const enabledCount = newItems.filter(it => it.enabled !== false).length;
+      const statusNote = enabledCount === newItems.length
+        ? (isJa ? '（全件積載対象）' : ' (all selected)')
+        : enabledCount === 0
+        ? (isJa ? '（全件未選択）' : ' (all deselected)')
+        : (isJa ? `（${enabledCount}件積載対象）` : ` (${enabledCount} selected)`);
+
       setImportNotification(
         isJa
-          ? `${fileTypeLabel} から ${newItems.length} 品目（合計 ${totalUnits.toLocaleString()} 個）を取り込みました（初期状態: 未選択）。`
-          : `Successfully imported ${newItems.length} items (${totalUnits.toLocaleString()} units) from ${fileTypeLabel} (initially deselected).`
+          ? `${fileTypeLabel} から ${newItems.length} 品目（合計 ${totalUnits.toLocaleString()} 個）を取り込みました${statusNote}。`
+          : `Successfully imported ${newItems.length} items (${totalUnits.toLocaleString()} units) from ${fileTypeLabel}${statusNote}.`
       );
       setTimeout(() => setImportNotification(null), 4500);
     } else {
